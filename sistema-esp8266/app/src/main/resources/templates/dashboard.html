@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="~{layout :: layout(~{::div})}">
+
+<body>
+    <div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white">
+                        <i class="fas fa-snowflake"></i> Springer Midea Control
+                    </div>
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Temperatura: <span id="tempDisplay">22</span>°C</h5>
+
+                        <div class="btn-group mb-3" role="group">
+                            <button onclick="changeTemp(-1)" class="btn btn-outline-secondary">-</button>
+                            <button onclick="changeTemp(1)" class="btn btn-outline-secondary">+</button>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button onclick="sendCommand('on')" class="btn btn-success btn-lg"><i
+                                    class="fas fa-power-off"></i> LIGAR</button>
+                            <button onclick="sendCommand('off')" class="btn btn-danger btn-lg">DESLIGAR</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let currentTemp = 22;
+
+            function changeTemp(delta) {
+                currentTemp += delta;
+                if (currentTemp < 17) currentTemp = 17;
+                if (currentTemp > 30) currentTemp = 30;
+                document.getElementById('tempDisplay').innerText = currentTemp;
+            }
+
+            // Função auxiliar para criar a notificação bonita
+            function notificar(mensagem, tipo) {
+                // Define a cor baseada no tipo (sucesso ou erro)
+                let corFundo = tipo === 'sucesso'
+                    ? "linear-gradient(to right, #00b09b, #96c93d)" // Verde
+                    : "linear-gradient(to right, #ff5f6d, #ffc371)"; // Laranja/Vermelho
+
+                Toastify({
+                    text: mensagem,
+                    duration: 3000,       // Dura 3 segundos
+                    close: true,          // Tem botão de fechar
+                    gravity: "top",       // Aparece no topo
+                    position: "right",    // No canto direito
+                    stopOnFocus: true,    // Para o tempo se passar o mouse
+                    style: {
+                        background: corFundo,
+                        borderRadius: "10px",
+                        boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+                    }
+                }).showToast();
+            }
+
+            function sendCommand(powerState) {
+                const payload = {
+                    power: powerState,
+                    temp: currentTemp
+                };
+
+                // Feedback visual imediato (opcional)
+                notificar("Enviando comando...", "sucesso");
+
+                fetch('/api/ac', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                })
+                    .then(response => {
+                        if (response.ok) {
+                            // SUBSTITUI O ALERT DE SUCESSO
+                            notificar("✅ Comando recebido pelo servidor!", "sucesso");
+                        } else {
+                            // SUBSTITUI O ALERT DE ERRO
+                            notificar("❌ Erro ao enviar comando.", "erro");
+                        }
+                    })
+                    .catch(error => {
+                        notificar("❌ Erro de conexão.", "erro");
+                    });
+            }
+        </script>
+    </div>
+</body>
+
+</html>

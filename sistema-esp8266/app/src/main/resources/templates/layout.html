@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:fragment="layout(content)">
+
+<head>
+    <meta charset="UTF-8">
+    <title>IoT Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+
+    <style>
+        body.dark-mode {
+            background-color: #121212;
+            color: #ffffff;
+        }
+
+        .sidebar {
+            min-height: 100vh;
+            background-color: #343a40;
+        }
+
+        .sidebar a {
+            color: white;
+            text-decoration: none;
+            padding: 15px;
+            display: block;
+        }
+
+        .sidebar a:hover {
+            background-color: #495057;
+        }
+
+        .card.dark-mode {
+            background-color: #1e1e1e;
+            border-color: #333;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="d-flex">
+        <div class="sidebar d-flex flex-column p-3 text-white" style="width: 280px;">
+            <span class="fs-4">🏠 Minha Casa</span>
+            <hr>
+            <ul class="nav nav-pills flex-column mb-auto">
+                <li class="nav-item"><a href="/" class="nav-link active"><i class="fas fa-tachometer-alt"></i>
+                        Dashboard</a></li>
+                <li><a href="#" class="nav-link"><i class="fas fa-cog"></i> Configurações</a></li>
+            </ul>
+            <hr>
+            <form th:action="@{/logout}" method="post">
+                <button type="submit" class="btn btn-danger w-100"><i class="fas fa-sign-out-alt"></i> Sair</button>
+            </form>
+        </div>
+
+        <div class="w-100">
+            <nav class="navbar navbar-light bg-light p-3 shadow-sm d-flex justify-content-between">
+                <span class="navbar-brand mb-0 h1">Controle de Climatização</span>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="darkModeSwitch">
+                    <label class="form-check-label" for="darkModeSwitch">Modo Escuro</label>
+                </div>
+            </nav>
+
+            <div class="container-fluid p-4" th:insert="${content}"></div>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+
+    <script>
+        // Lógica Dark Mode
+        const toggle = document.getElementById('darkModeSwitch');
+        const body = document.body;
+
+        if (localStorage.getItem('darkMode') === 'enabled') {
+            body.classList.add('dark-mode');
+            toggle.checked = true;
+            updateBootstrapMode(true);
+        }
+
+        toggle.addEventListener('change', () => {
+            if (toggle.checked) {
+                body.classList.add('dark-mode');
+                localStorage.setItem('darkMode', 'enabled');
+                updateBootstrapMode(true);
+            } else {
+                body.classList.remove('dark-mode');
+                localStorage.setItem('darkMode', 'disabled');
+                updateBootstrapMode(false);
+            }
+        });
+
+        function updateBootstrapMode(isDark) {
+            document.querySelectorAll('.navbar, .card').forEach(el => {
+                if (isDark) { el.classList.add('bg-dark', 'text-white', 'navbar-dark'); el.classList.remove('bg-light', 'navbar-light'); }
+                else { el.classList.remove('bg-dark', 'text-white', 'navbar-dark'); el.classList.add('bg-light', 'navbar-light'); }
+            });
+        }
+    </script>
+</body>
+
+</html>
