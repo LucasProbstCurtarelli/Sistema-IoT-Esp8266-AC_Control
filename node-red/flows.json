@@ -1,0 +1,212 @@
+[
+    {
+        "id": "0e2a55c9250480b3",
+        "type": "tab",
+        "label": "Fluxo 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "tab_ac_control",
+        "type": "tab",
+        "label": "Controle AC (ESP8266)",
+        "disabled": false,
+        "info": "Fluxo para controlar Ar Condicionado via MQTT e ESP8266"
+    },
+    {
+        "id": "broker_local_config",
+        "type": "mqtt-broker",
+        "name": "Broker Local (Node-RED)",
+        "broker": "localhost",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": ""
+    },
+    {
+        "id": "mqtt_broker_aedes",
+        "type": "aedes broker",
+        "z": "tab_ac_control",
+        "name": "Broker MQTT Interno",
+        "mqtt_port": "1883",
+        "mqtt_ws_bind": "port",
+        "mqtt_ws_port": "",
+        "mqtt_ws_path": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "persistence_bind": "memory",
+        "dburl": "",
+        "usetls": false,
+        "x": 140,
+        "y": 80,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "inject_on_22",
+        "type": "inject",
+        "z": "tab_ac_control",
+        "name": "Ligar (22°C)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"power\": \"on\", \"temp\": 22}",
+        "payloadType": "json",
+        "x": 150,
+        "y": 200,
+        "wires": [
+            [
+                "mqtt_out_comando"
+            ]
+        ]
+    },
+    {
+        "id": "inject_off",
+        "type": "inject",
+        "z": "tab_ac_control",
+        "name": "Desligar",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"power\": \"off\"}",
+        "payloadType": "json",
+        "x": 140,
+        "y": 280,
+        "wires": [
+            [
+                "mqtt_out_comando"
+            ]
+        ]
+    },
+    {
+        "id": "mqtt_out_comando",
+        "type": "mqtt out",
+        "z": "tab_ac_control",
+        "name": "Enviar Comando",
+        "topic": "/iot/sensores/ac/comando",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "broker_local_config",
+        "x": 450,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "mqtt_in_estado",
+        "type": "mqtt in",
+        "z": "tab_ac_control",
+        "name": "Receber Estado",
+        "topic": "/iot/sensores/ac/estado",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "broker_local_config",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 400,
+        "wires": [
+            [
+                "debug_estado"
+            ]
+        ]
+    },
+    {
+        "id": "debug_estado",
+        "type": "debug",
+        "z": "tab_ac_control",
+        "name": "Status do AC",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 390,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "mqtt_in_debug",
+        "type": "mqtt in",
+        "z": "tab_ac_control",
+        "name": "Receber Debug",
+        "topic": "/iot/sensores/ac/debug",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "broker_local_config",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 460,
+        "wires": [
+            [
+                "debug_log"
+            ]
+        ]
+    },
+    {
+        "id": "debug_log",
+        "type": "debug",
+        "z": "tab_ac_control",
+        "name": "Log Loopback",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 390,
+        "y": 460,
+        "wires": []
+    }
+]

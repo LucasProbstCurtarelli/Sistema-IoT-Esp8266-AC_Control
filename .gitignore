@@ -1,0 +1,21 @@
+# --- Arquivos de Sistema e IDE ---
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Arquivos de Compilação (Lixo gerado pelo Java) ---
+target/
+*.class
+*.log
+*.jar
+*.war
+
+# --- Segredos e Senhas (O MAIS IMPORTANTE) ---
+application-dev.properties
+.env
+secret.properties
+
+# --- Maven Wrapper (Opcional, mas bom manter se quiser) ---
+!.mvn/wrapper/maven-wrapper.jar
