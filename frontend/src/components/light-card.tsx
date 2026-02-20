@@ -6,24 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { lightingService, type LightCommandRequest } from "@/services/api";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import { adjustBrightness, extractBrightness } from "@/lib/color-utils";
-
-// Color presets for quick selection
-const COLOR_PRESETS = [
-  { name: "Branco Quente", color: "#FFE4B5", icon: "☀️" },
-  { name: "Branco Frio", color: "#F0F8FF", icon: "❄️" },
-  { name: "Relaxar", color: "#FFB347", icon: "🧘" },
-  { name: "Concentrar", color: "#87CEEB", icon: "💡" },
-  { name: "Vermelho", color: "#FF4444", icon: "🔴" },
-  { name: "Verde", color: "#44FF44", icon: "🟢" },
-  { name: "Azul", color: "#4444FF", icon: "🔵" },
-  { name: "Roxo", color: "#9944FF", icon: "🟣" },
-] as const;
 
 export interface LightState {
   state: boolean;
@@ -46,7 +33,6 @@ interface LightCardProps {
  * - On/Off toggle with optimistic updates
  * - Brightness slider with debounce (300ms)
  * - Color picker with debounce (150ms for better UX)
- * - Color presets for quick selection
  * - Visual loading states
  * - Error handling with toast notifications
  */
@@ -205,13 +191,6 @@ function LightCardComponent({
     }
   }, [lightState, deviceName, onStateChange]);
 
-  /**
-   * Applies a color preset.
-   */
-  const applyPreset = useCallback((presetColor: string) => {
-    handleColorChange(presetColor);
-  }, [handleColorChange]);
-
   // Send brightness command after debounce
   useEffect(() => {
     // Skip initial mount
@@ -350,36 +329,7 @@ function LightCardComponent({
             )}
           </Label>
           
-          {/* Color presets */}
-          <div className="flex flex-wrap gap-2">
-            <TooltipProvider delayDuration={200}>
-              {COLOR_PRESETS.map((preset) => (
-                <Tooltip key={preset.color}>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => applyPreset(preset.color)}
-                      disabled={!showControls || isToggling}
-                      className={cn(
-                        "h-8 w-8 rounded-full border-2 transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                        lightState.color.toLowerCase() === preset.color.toLowerCase()
-                          ? "border-primary ring-2 ring-primary/50"
-                          : "border-border hover:border-primary/50",
-                        (!showControls || isToggling) && "cursor-not-allowed opacity-50"
-                      )}
-                      style={{ backgroundColor: preset.color }}
-                      aria-label={preset.name}
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{preset.icon} {preset.name}</p>
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </TooltipProvider>
-          </div>
-          
-          {/* Custom color picker */}
+          {/* Color picker */}
           <div className="flex items-center gap-3">
             <input
               id={`color-${deviceName}`}
