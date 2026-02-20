@@ -332,7 +332,7 @@ function LightCardComponent({
           </div>
           <Slider
             id={`brightness-${deviceName}`}
-            min={1}
+            min={0}
             max={100}
             step={1}
             value={[lightState.brightness]}
