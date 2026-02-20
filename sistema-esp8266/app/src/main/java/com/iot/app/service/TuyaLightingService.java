@@ -1,8 +1,11 @@
 package com.iot.app.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.iot.app.dto.LightCommandRequest;
+import com.iot.app.dto.LightStatusResponse;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
@@ -11,6 +14,12 @@ import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -39,6 +48,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
     private static final int CONNECTION_TIMEOUT = 30;
     private static final int KEEP_ALIVE_INTERVAL = 60;
     private static final long RECONNECT_DELAY_MS = 5000;
+    private static final long STATE_QUERY_TIMEOUT_SECONDS = 5;
     
     private final ObjectMapper objectMapper;
     private final ReentrantLock connectionLock = new ReentrantLock();
@@ -47,6 +57,9 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
     private volatile boolean isShuttingDown = false;
     private Thread reconnectThread;
     private volatile boolean shouldReconnect = true;
+    
+    // Map para armazenar futures de consulta de estado (correlationId -> CompletableFuture)
+    private final ConcurrentHashMap<String, CompletableFuture<LightStatusResponse>> pendingQueries = new ConcurrentHashMap<>();
 
     public TuyaLightingService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -55,6 +68,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
     @Override
     public void afterPropertiesSet() {
         connect();
+        subscribeToStateTopic();
         startReconnectMonitor();
     }
 
@@ -186,6 +200,156 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         LightCommandRequest request = new LightCommandRequest();
         request.setState(isOn);
         sendLightCommand(deviceName, request);
+    }
+    
+    /**
+     * Gets the real-time state of a light bulb by querying the device via MQTT.
+     * 
+     * This method uses a request/response pattern:
+     * 1. Publishes a query message to tuya/{deviceName}/query with a correlation ID
+     * 2. Waits for a response on tuya/{deviceName}/state with matching correlation ID
+     * 3. Returns the device state or throws an exception on timeout/error
+     * 
+     * @param deviceName The device name (e.g., "lampada_1", "lampada_2")
+     * @return LightStatusResponse with the current device state
+     * @throws TuyaLightingException if the query fails or times out
+     */
+    public LightStatusResponse getRealState(String deviceName) {
+        if (deviceName == null || deviceName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Device name cannot be null or empty");
+        }
+        
+        ensureConnected();
+        
+        // Generate unique correlation ID
+        String correlationId = UUID.randomUUID().toString();
+        
+        // Create CompletableFuture for async response
+        CompletableFuture<LightStatusResponse> future = new CompletableFuture<>();
+        pendingQueries.put(correlationId, future);
+        
+        try {
+            // Build query message
+            ObjectNode queryPayload = objectMapper.createObjectNode();
+            queryPayload.put("correlationId", correlationId);
+            queryPayload.put("timestamp", System.currentTimeMillis());
+            
+            String queryTopic = "tuya/" + deviceName + "/query";
+            String jsonPayload;
+            try {
+                jsonPayload = objectMapper.writeValueAsString(queryPayload);
+            } catch (JsonProcessingException e) {
+                throw new TuyaLightingException("Failed to serialize query payload", e);
+            }
+            
+            logger.debug("Publishing state query for device '{}' with correlation ID: {}", deviceName, correlationId);
+            
+            // Publish query
+            publishMessage(queryTopic, jsonPayload);
+            
+            // Wait for response with timeout
+            try {
+                LightStatusResponse response = future.get(STATE_QUERY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                logger.debug("Received state response for device '{}'", deviceName);
+                return response;
+            } catch (TimeoutException e) {
+                logger.error("Timeout waiting for state response from device '{}'", deviceName);
+                throw new TuyaLightingException("Timeout waiting for device state response");
+            } catch (Exception e) {
+                logger.error("Error waiting for state response from device '{}': {}", deviceName, e.getMessage());
+                throw new TuyaLightingException("Error getting device state: " + e.getMessage(), e);
+            }
+        } catch (Exception e) {
+            pendingQueries.remove(correlationId);
+            if (e instanceof TuyaLightingException) {
+                throw e;
+            }
+            throw new TuyaLightingException("Failed to query device state: " + e.getMessage(), e);
+        } finally {
+            // Clean up future if still pending
+            pendingQueries.remove(correlationId);
+        }
+    }
+    
+    /**
+     * Subscribes to state topic to receive responses to state queries.
+     */
+    private void subscribeToStateTopic() {
+        connectionLock.lock();
+        try {
+            if (mqttClient == null || !mqttClient.isConnected()) {
+                logger.warn("Cannot subscribe to state topic: MQTT client not connected");
+                return;
+            }
+            
+            String stateTopic = "tuya/+/state";
+            mqttClient.subscribe(stateTopic, QOS, new IMqttMessageListener() {
+                @Override
+                public void messageArrived(String topic, MqttMessage message) throws Exception {
+                    handleStateMessage(topic, message);
+                }
+            });
+            
+            logger.info("Subscribed to state topic: {}", stateTopic);
+        } catch (MqttException e) {
+            logger.error("Failed to subscribe to state topic: {}", e.getMessage(), e);
+        } finally {
+            connectionLock.unlock();
+        }
+    }
+    
+    /**
+     * Handles incoming state messages from the bridge.
+     */
+    private void handleStateMessage(String topic, MqttMessage message) {
+        try {
+            String payload = new String(message.getPayload());
+            JsonNode jsonNode = objectMapper.readTree(payload);
+            
+            String correlationId = jsonNode.has("correlationId") ? 
+                jsonNode.get("correlationId").asText() : null;
+            
+            if (correlationId == null) {
+                logger.debug("Received state message without correlation ID, ignoring");
+                return;
+            }
+            
+            CompletableFuture<LightStatusResponse> future = pendingQueries.get(correlationId);
+            if (future == null) {
+                logger.debug("Received state message with unknown correlation ID: {}", correlationId);
+                return;
+            }
+            
+            // Check for error in response
+            if (jsonNode.has("error")) {
+                String error = jsonNode.get("error").asText();
+                logger.error("Bridge returned error for correlation ID {}: {}", correlationId, error);
+                future.completeExceptionally(new TuyaLightingException("Device error: " + error));
+                pendingQueries.remove(correlationId);
+                return;
+            }
+            
+            // Extract device name from topic (tuya/lampada_1/state -> lampada_1)
+            String deviceName = topic.split("/")[1];
+            
+            // Build LightStatusResponse from bridge response
+            LightStatusResponse response = LightStatusResponse.builder()
+                .success(true)
+                .device(deviceName)
+                .state(jsonNode.has("state") ? jsonNode.get("state").asBoolean() : null)
+                .brightness(jsonNode.has("brightness") ? jsonNode.get("brightness").asInt() : null)
+                .color(jsonNode.has("color") ? jsonNode.get("color").asText() : null)
+                .lastUpdated(Instant.now())
+                .build();
+            
+            future.complete(response);
+            pendingQueries.remove(correlationId);
+            
+            logger.debug("Completed state query for device '{}' with correlation ID: {}", deviceName, correlationId);
+            
+        } catch (Exception e) {
+            logger.error("Error handling state message: {}", e.getMessage(), e);
+        }
     }
     
     /**
@@ -334,6 +498,9 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             mqttClient.connect(options);
             
             logger.info("Successfully connected to MQTT broker");
+            
+            // Subscribe to state topic after connection
+            subscribeToStateTopic();
             
         } catch (MqttException e) {
             logger.error("Failed to connect to MQTT broker: {}", e.getMessage(), e);

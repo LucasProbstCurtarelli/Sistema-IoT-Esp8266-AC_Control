@@ -79,11 +79,16 @@ async function connectDevice(deviceName, deviceConfig) {
 
     device.on('disconnected', () => {
         console.log(`[Bridge] ❌ Desconectado da lâmpada ${deviceName}`);
+        // Limpa referência mas mantém IP para reconexão rápida
         deviceConfig.device = null;
     });
 
     device.on('error', (error) => {
         console.error(`[Bridge] ❌ Erro na lâmpada ${deviceName}:`, error.message);
+    });
+    
+    device.on('data', (data) => {
+        console.log(`[Bridge] 📥 Dados recebidos da lâmpada ${deviceName}:`, JSON.stringify(data, null, 2));
     });
 
     try {
@@ -116,6 +121,257 @@ async function connectAllDevices() {
 }
 
 /**
+ * Converte cor Tuya (HHHHSSSSVVVV) para RGB hex (#RRGGBB)
+ */
+function tuyaColorHexToRgbHex(tuyaHex) {
+    if (!tuyaHex || tuyaHex.length !== 12) {
+        return '#FFFFFF'; // Default white
+    }
+    
+    // Extrai HSV do formato Tuya
+    const hue = parseInt(tuyaHex.substring(0, 4), 16);        // 0-360
+    const saturation = parseInt(tuyaHex.substring(4, 8), 16); // 0-1000
+    const value = parseInt(tuyaHex.substring(8, 12), 16);     // 0-1000
+    
+    // Normaliza para 0-1
+    const h = hue / 360.0;
+    const s = saturation / 1000.0;
+    const v = value / 1000.0;
+    
+    // Converte HSV para RGB
+    const c = v * s;
+    const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+    const m = v - c;
+    
+    let r, g, b;
+    if (h < 1/6) {
+        r = c; g = x; b = 0;
+    } else if (h < 2/6) {
+        r = x; g = c; b = 0;
+    } else if (h < 3/6) {
+        r = 0; g = c; b = x;
+    } else if (h < 4/6) {
+        r = 0; g = x; b = c;
+    } else if (h < 5/6) {
+        r = x; g = 0; b = c;
+    } else {
+        r = c; g = 0; b = x;
+    }
+    
+    // Converte para 0-255 e formata como hex
+    const rInt = Math.round((r + m) * 255);
+    const gInt = Math.round((g + m) * 255);
+    const bInt = Math.round((b + m) * 255);
+    
+    return '#' + 
+        rInt.toString(16).padStart(2, '0') +
+        gInt.toString(16).padStart(2, '0') +
+        bInt.toString(16).padStart(2, '0');
+}
+
+/**
+ * Converte estado Tuya (DPS) para formato legível
+ */
+function convertTuyaStateToResponse(tuyaState) {
+    // Valida entrada
+    if (!tuyaState || typeof tuyaState !== 'object') {
+        throw new Error('Invalid tuyaState: expected object but got ' + typeof tuyaState);
+    }
+    
+    // TuyAPI pode retornar dps diretamente ou dentro de um objeto
+    // Tenta diferentes formatos possíveis
+    let dps = {};
+    
+    if (tuyaState.dps && typeof tuyaState.dps === 'object') {
+        // Formato padrão: { dps: { '20': true, '22': 500, ... } }
+        dps = tuyaState.dps;
+    } else if (tuyaState['20'] !== undefined || tuyaState['21'] !== undefined || tuyaState['22'] !== undefined) {
+        // Formato direto: { '20': true, '22': 500, ... }
+        dps = tuyaState;
+    } else {
+        // Tenta acessar propriedades numéricas como strings
+        const keys = Object.keys(tuyaState);
+        const numericKeys = keys.filter(k => /^\d+$/.test(k));
+        if (numericKeys.length > 0) {
+            dps = tuyaState;
+        } else {
+            console.warn(`[Bridge] Estado Tuya não tem formato DPS esperado:`, tuyaState);
+            // Retorna valores padrão se não conseguir extrair DPS
+            return {
+                state: false,
+                brightness: 100,
+                color: '#FFFFFF',
+                mode: 'white'
+            };
+        }
+    }
+    
+    // DPS 20: Power state
+    const state = dps['20'] === true || dps['20'] === 1 || dps['20'] === 'true';
+    
+    // DPS 22: Brightness (10-1000) -> (0-100)
+    let brightness = 100;
+    if (dps['22'] !== undefined && dps['22'] !== null) {
+        const tuyaBrightness = parseInt(dps['22']);
+        if (!isNaN(tuyaBrightness)) {
+            brightness = Math.round(((tuyaBrightness - 10) / 990) * 100);
+            brightness = Math.max(0, Math.min(100, brightness));
+        }
+    }
+    
+    // DPS 24: Color (HHHHSSSSVVVV) -> (#RRGGBB)
+    let color = '#FFFFFF';
+    if (dps['24'] && typeof dps['24'] === 'string') {
+        try {
+            color = tuyaColorHexToRgbHex(dps['24']);
+        } catch (e) {
+            console.warn(`[Bridge] Erro ao converter cor ${dps['24']}:`, e.message);
+        }
+    }
+    
+    // DPS 21: Mode
+    const mode = dps['21'] || 'white';
+    
+    return {
+        state,
+        brightness,
+        color,
+        mode
+    };
+}
+
+/**
+ * Obtém estado do dispositivo aguardando evento 'data'
+ * O TuyAPI não retorna diretamente de get(), os dados chegam via evento
+ */
+function getDeviceState(device) {
+    return new Promise((resolve, reject) => {
+        let resolved = false;
+        
+        const timeout = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                device.removeListener('data', dataHandler);
+                reject(new Error('Timeout waiting for device state'));
+            }
+        }, 5000);
+        
+        const dataHandler = (data) => {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                device.removeListener('data', dataHandler);
+                resolve(data);
+            }
+        };
+        
+        // Adiciona listener ANTES de chamar get()
+        // Usa prependOnceListener para garantir que seja chamado antes do listener global
+        device.prependOnceListener('data', dataHandler);
+        
+        // Chama get() para solicitar estado
+        device.get().catch((error) => {
+            if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                device.removeListener('data', dataHandler);
+                reject(error);
+            }
+        });
+    });
+}
+
+/**
+ * Processa query de estado MQTT e consulta a lâmpada
+ */
+async function handleStateQuery(deviceName, queryPayload) {
+    const deviceConfig = DEVICES[deviceName];
+    
+    if (!deviceConfig) {
+        console.error(`[Bridge] ❌ Dispositivo desconhecido: ${deviceName}`);
+        const errorResponse = {
+            correlationId: queryPayload.correlationId,
+            error: 'Device not found',
+            timestamp: Date.now()
+        };
+        mqttClient.publish(`tuya/${deviceName}/state`, JSON.stringify(errorResponse));
+        return;
+    }
+    
+    // Garante que está conectado
+    if (!deviceConfig.device) {
+        console.log(`[Bridge] Conectando à lâmpada ${deviceName} para consulta...`);
+        const connected = await connectDevice(deviceName, deviceConfig);
+        if (!connected) {
+            console.error(`[Bridge] ❌ Não foi possível conectar à lâmpada ${deviceName}`);
+            const errorResponse = {
+                correlationId: queryPayload.correlationId,
+                error: 'Device not connected',
+                timestamp: Date.now()
+            };
+            mqttClient.publish(`tuya/${deviceName}/state`, JSON.stringify(errorResponse));
+            return;
+        }
+    }
+    
+    // Verifica se dispositivo está conectado
+    if (!deviceConfig.device.isConnected()) {
+        console.log(`[Bridge] Dispositivo desconectado, tentando reconectar à lâmpada ${deviceName}...`);
+        // Limpa referência e reconecta com nova instância
+        deviceConfig.device = null;
+        const connected = await connectDevice(deviceName, deviceConfig);
+        if (!connected) {
+            console.error(`[Bridge] ❌ Não foi possível reconectar à lâmpada ${deviceName}`);
+            const errorResponse = {
+                correlationId: queryPayload.correlationId,
+                error: 'Device not connected',
+                timestamp: Date.now()
+            };
+            mqttClient.publish(`tuya/${deviceName}/state`, JSON.stringify(errorResponse));
+            return;
+        }
+    }
+    
+    try {
+        console.log(`[Bridge] 📊 Consultando estado da lâmpada ${deviceName}...`);
+        
+        // Obtém estado aguardando evento 'data'
+        const tuyaState = await getDeviceState(deviceConfig.device);
+        
+        // Debug: log do estado bruto recebido
+        console.log(`[Bridge] Estado bruto recebido de ${deviceName}:`, JSON.stringify(tuyaState, null, 2));
+        
+        // Valida se o estado foi retornado
+        if (!tuyaState) {
+            throw new Error('Device returned null or undefined state');
+        }
+        
+        // Converte para formato legível
+        const response = convertTuyaStateToResponse(tuyaState);
+        response.correlationId = queryPayload.correlationId;
+        response.timestamp = Date.now();
+        
+        // Publica resposta
+        const stateTopic = `tuya/${deviceName}/state`;
+        mqttClient.publish(stateTopic, JSON.stringify(response), { qos: 1 });
+        
+        console.log(`[Bridge] ✅ Estado consultado e publicado para ${deviceName}:`, response);
+        
+    } catch (error) {
+        console.error(`[Bridge] ❌ Erro ao consultar estado da lâmpada ${deviceName}:`, error.message);
+        console.error(`[Bridge] Stack trace:`, error.stack);
+        
+        const errorResponse = {
+            correlationId: queryPayload.correlationId,
+            error: error.message,
+            timestamp: Date.now()
+        };
+        
+        mqttClient.publish(`tuya/${deviceName}/state`, JSON.stringify(errorResponse));
+    }
+}
+
+/**
  * Processa comando MQTT e envia para a lâmpada
  */
 async function processCommand(deviceName, payload) {
@@ -139,8 +395,13 @@ async function processCommand(deviceName, payload) {
     deviceConfig.lastCommandTime = Date.now();
 
     // Garante que está conectado
-    if (!deviceConfig.device) {
-        console.log(`[Bridge] Conectando à lâmpada ${deviceName}...`);
+    if (!deviceConfig.device || !deviceConfig.device.isConnected()) {
+        if (!deviceConfig.device) {
+            console.log(`[Bridge] Conectando à lâmpada ${deviceName}...`);
+        } else {
+            console.log(`[Bridge] Dispositivo desconectado, reconectando à lâmpada ${deviceName}...`);
+            deviceConfig.device = null;
+        }
         const connected = await connectDevice(deviceName, deviceConfig);
         if (!connected) {
             console.error(`[Bridge] ❌ Não foi possível conectar à lâmpada ${deviceName}`);
@@ -300,9 +561,9 @@ function startBridge() {
         await connectAllDevices();
         
         // Subscribe nos tópicos de comando
-        const topics = Object.keys(DEVICES).map(name => `tuya/${name}/command`);
+        const commandTopics = Object.keys(DEVICES).map(name => `tuya/${name}/command`);
         
-        topics.forEach(topic => {
+        commandTopics.forEach(topic => {
             mqttClient.subscribe(topic, { qos: 1 }, (err) => {
                 if (err) {
                     console.error(`❌ Erro ao subscrever em ${topic}:`, err);
@@ -312,7 +573,16 @@ function startBridge() {
             });
         });
         
-        console.log('\n✅ Bridge iniciado e pronto para receber comandos!\n');
+        // Subscribe nos tópicos de query (consulta de estado)
+        mqttClient.subscribe('tuya/+/query', { qos: 1 }, (err) => {
+            if (err) {
+                console.error(`❌ Erro ao subscrever em tuya/+/query:`, err);
+            } else {
+                console.log(`📡 Escutando tópico: tuya/+/query (consultas de estado)`);
+            }
+        });
+        
+        console.log('\n✅ Bridge iniciado e pronto para receber comandos e consultas!\n');
     });
 
     mqttClient.on('error', (err) => {
@@ -322,14 +592,28 @@ function startBridge() {
     mqttClient.on('message', async (topic, message) => {
         try {
             const payload = JSON.parse(message.toString());
-            const deviceName = topic.split('/')[1]; // tuya/lampada_1/command -> lampada_1
+            const topicParts = topic.split('/');
+            const deviceName = topicParts[1]; // tuya/lampada_1/command -> lampada_1
+            const messageType = topicParts[2]; // command, query, state
             
-            console.log(`\n📥 [${new Date().toISOString()}] Comando recebido:`);
-            console.log(`   Tópico: ${topic}`);
-            console.log(`   Device: ${deviceName}`);
-            console.log(`   Payload: ${message.toString()}`);
-            
-            await processCommand(deviceName, payload);
+            if (messageType === 'query') {
+                // Consulta de estado
+                console.log(`\n📥 [${new Date().toISOString()}] Query de estado recebida:`);
+                console.log(`   Tópico: ${topic}`);
+                console.log(`   Device: ${deviceName}`);
+                console.log(`   Correlation ID: ${payload.correlationId}`);
+                
+                await handleStateQuery(deviceName, payload);
+            } else if (messageType === 'command') {
+                // Comando de controle
+                console.log(`\n📥 [${new Date().toISOString()}] Comando recebido:`);
+                console.log(`   Tópico: ${topic}`);
+                console.log(`   Device: ${deviceName}`);
+                console.log(`   Payload: ${message.toString()}`);
+                
+                await processCommand(deviceName, payload);
+            }
+            // Ignora mensagens de state (são respostas que não precisam ser processadas aqui)
             
         } catch (error) {
             console.error(`❌ Erro ao processar mensagem do tópico ${topic}:`, error.message);
