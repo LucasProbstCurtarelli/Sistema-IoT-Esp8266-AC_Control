@@ -1,21 +1,108 @@
-# --- Arquivos de Sistema e IDE ---
-.idea/
-*.iml
-.vscode/
-.DS_Store
-Thumbs.db
-
-# --- Arquivos de Compilação (Lixo gerado pelo Java) ---
-target/
+# Compiled class files
 *.class
+
+# Log files
 *.log
+
+# Package Files
 *.jar
 *.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
 
-# --- Segredos e Senhas (O MAIS IMPORTANTE) ---
-application-dev.properties
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Spring Boot
+*.iml
+.idea/
+*.iws
+*.ipr
+out/
+
+# Node.js / Node-RED
+node_modules/
+node-red/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.node_repl_history
+
+# Node-RED
+node-red/.node-red/
+node-red/flows_cred.json
+node-red/lib/flows/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.settings/
+.classpath
+.project
+
+# Environment variables
 .env
-secret.properties
+.env.local
+.env.*.local
 
-# --- Maven Wrapper (Opcional, mas bom manter se quiser) ---
-!.mvn/wrapper/maven-wrapper.jar
+# Sensitive configuration files
+tuya-mqtt/devices.conf
+sistema-esp8266/app/src/main/resources/application-dev.properties
+
+# Build outputs
+dist/
+build/
+bin/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Logs
+logs/
+*.log
+tuya-mqtt-bridge/logs/
+
+# Wireshark captures (pode conter informações sensíveis)
+*.pcap
+*.pcapng
+
+# Python (se usar scripts auxiliares)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/

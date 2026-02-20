@@ -1,36 +1,68 @@
 package com.iot.app.controller;
 
+import com.iot.app.config.AcConfig;
 import com.iot.app.dto.AcPayload;
-import com.iot.app.service.MqttService;
+import com.iot.app.service.IMqttService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * REST controller for managing Air Conditioner via ESP8266.
+ * 
+ * This controller exposes HTTP endpoints to control the air conditioner
+ * through the web dashboard. Commands are sent via MQTT to ESP8266.
+ * 
+ * Available endpoint:
+ * - POST /api/ac - Sends control command (power, temperature)
+ * 
+ * Refactored to:
+ * - Use dependency injection for service interface (Dependency Inversion)
+ * - Use proper logging
+ * - Extract constants to configuration class
+ * 
+ * @author Sistema de Automação Residencial
+ * @version 2.0
+ */
 @RestController
 @RequestMapping("/api/ac")
 public class AcController {
 
-    @Autowired
-    private MqttService mqttService;
+    private static final Logger logger = LoggerFactory.getLogger(AcController.class);
+    
+    private final IMqttService mqttService;
+    private final ObjectMapper objectMapper;
 
-    // Tópico definido no seu código C++
-    private static final String TOPIC_CMD = "/iot/sensores/ac/comando";
+    public AcController(IMqttService mqttService, ObjectMapper objectMapper) {
+        this.mqttService = mqttService;
+        this.objectMapper = objectMapper;
+    }
 
+    /**
+     * Endpoint to send commands to the air conditioner.
+     * 
+     * Receives a JSON object with parameters (power: "on"/"off", temp: temperature)
+     * and publishes to MQTT topic for ESP8266 to process.
+     * 
+     * @param payload JSON object containing power and temperature
+     * @return HTTP response indicating success or error
+     */
     @PostMapping
     public ResponseEntity<String> sendCommand(@RequestBody AcPayload payload) {
         try {
-            // Converte o objeto Java de volta para JSON String
-            ObjectMapper mapper = new ObjectMapper();
-            String jsonString = mapper.writeValueAsString(payload);
+            String jsonString = objectMapper.writeValueAsString(payload);
+            logger.info("Sending AC command: {}", jsonString);
+            
+            mqttService.publish(AcConfig.TOPIC_CMD, jsonString);
 
-            // Envia para o MQTT
-            mqttService.publish(TOPIC_CMD, jsonString);
-
-            return ResponseEntity.ok("Comando enviado com sucesso!");
+            return ResponseEntity.ok("Command sent successfully to air conditioner!");
             
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body("Erro: " + e.getMessage());
+            logger.error("Error sending AC command: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                .body("Error sending command: " + e.getMessage());
         }
     }
 }

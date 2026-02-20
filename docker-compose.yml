@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - tuya-network
+    restart: unless-stopped
+
+  tuya-mqtt:
+    image: thecodemonkey/tuya-mqtt:latest
+    container_name: tuya-mqtt
+    depends_on:
+      - mosquitto
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+    volumes:
+      - ./tuya-mqtt/devices.conf:/app/devices.conf:ro
+    networks:
+      - tuya-network
+    restart: unless-stopped
+
+networks:
+  tuya-network:
+    driver: bridge
