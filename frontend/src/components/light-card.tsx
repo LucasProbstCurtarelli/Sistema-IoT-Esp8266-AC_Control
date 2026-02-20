@@ -60,21 +60,43 @@ function LightCardComponent({
   const prevDebouncedColor = useRef<string | null>(null);
   const prevInitialState = useRef<LightState>(initialState);
   const isInitialMount = useRef(true);
+  const userInitiatedChange = useRef(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Debounced values - color has shorter debounce for better UX
   const debouncedBrightness = useDebounce(localBrightness, 300);
   const debouncedColor = useDebounce(localColor, 150);
 
-  // Sync with external state changes (e.g., "Turn Off All" button)
-  // Only syncs when the power state changes externally
+  // Sync with external state changes (e.g., from refreshLightStates)
+  // This should NOT trigger command sends unless user initiated the change
   useEffect(() => {
     const prev = prevInitialState.current;
     
-    // Detect if power state changed externally
-    if (prev.state !== initialState.state) {
-      setLightState(initialState);
-      setLocalBrightness(initialState.brightness);
-      setLocalColor(initialState.color);
+    // Check if any state changed externally
+    const stateChanged = 
+      prev.state !== initialState.state ||
+      prev.brightness !== initialState.brightness ||
+      prev.color !== initialState.color;
+    
+    if (stateChanged) {
+      // Only sync if this is NOT a user-initiated change
+      // If user is changing something, don't override their changes
+      if (!userInitiatedChange.current) {
+        // Clear any pending sync timeout
+        if (syncTimeoutRef.current) {
+          clearTimeout(syncTimeoutRef.current);
+        }
+        
+        setLightState(initialState);
+        setLocalBrightness(initialState.brightness);
+        setLocalColor(initialState.color);
+        
+        // Reset debounced refs to prevent triggering commands
+        prevDebouncedBrightness.current = initialState.brightness;
+        prevDebouncedColor.current = initialState.color;
+      }
+      // If user initiated change, don't sync - let user's change complete first
+      // The flag will be reset after command is sent (handled in sendCommand useEffects)
     }
     
     prevInitialState.current = initialState;
@@ -159,6 +181,10 @@ function LightCardComponent({
    */
   const handleBrightnessChange = useCallback((value: number[]) => {
     const newBrightness = value[0];
+    
+    // Mark as user-initiated change
+    userInitiatedChange.current = true;
+    
     setLocalBrightness(newBrightness);
     
     // Calculate adjusted hex color with new brightness (maintains hue and saturation)
@@ -177,6 +203,9 @@ function LightCardComponent({
    * Handles color picker changes.
    */
   const handleColorChange = useCallback((color: string) => {
+    // Mark as user-initiated change
+    userInitiatedChange.current = true;
+    
     setLocalColor(color);
     
     // Extract brightness from the new color and sync it
@@ -203,6 +232,14 @@ function LightCardComponent({
     
     // Skip if value hasn't changed
     if (prevDebouncedBrightness.current === debouncedBrightness) return;
+    
+    // Only send command if this is a user-initiated change
+    if (!userInitiatedChange.current) {
+      // External sync - just update ref without sending command
+      prevDebouncedBrightness.current = debouncedBrightness;
+      return;
+    }
+    
     prevDebouncedBrightness.current = debouncedBrightness;
     
     // Skip if light is off
@@ -215,19 +252,42 @@ function LightCardComponent({
     // Send ONLY color with adjusted hex (no brightness field)
     sendCommand({ 
       color: adjustedColor 
-    }, setIsSendingBrightness);
+    }, setIsSendingBrightness).finally(() => {
+      // Reset flag after command completes (success or error)
+      setTimeout(() => {
+        userInitiatedChange.current = false;
+      }, 100);
+    });
   }, [debouncedBrightness, lightState.state, lightState.color, sendCommand]);
 
   // Send color command after debounce
   useEffect(() => {
+    // Skip initial mount
+    if (isInitialMount.current) {
+      return;
+    }
+    
     // Skip if value hasn't changed
     if (prevDebouncedColor.current === debouncedColor) return;
+    
+    // Only send command if this is a user-initiated change
+    if (!userInitiatedChange.current) {
+      // External sync - just update ref without sending command
+      prevDebouncedColor.current = debouncedColor;
+      return;
+    }
+    
     prevDebouncedColor.current = debouncedColor;
     
     // Skip if light is off
     if (!lightState.state) return;
     
-    sendCommand({ color: debouncedColor }, setIsSendingColor);
+    sendCommand({ color: debouncedColor }, setIsSendingColor).finally(() => {
+      // Reset flag after command completes (success or error)
+      setTimeout(() => {
+        userInitiatedChange.current = false;
+      }, 100);
+    });
   }, [debouncedColor, lightState.state, sendCommand]);
 
   const isLoading = isToggling || isSendingBrightness || isSendingColor;

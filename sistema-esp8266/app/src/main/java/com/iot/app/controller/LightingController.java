@@ -2,7 +2,6 @@ package com.iot.app.controller;
 
 import com.iot.app.dto.LightCommandRequest;
 import com.iot.app.dto.LightStatusResponse;
-import com.iot.app.service.LightStateCache;
 import com.iot.app.service.TuyaLightingService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -33,11 +32,9 @@ public class LightingController {
     private static final Logger logger = LoggerFactory.getLogger(LightingController.class);
     
     private final TuyaLightingService lightingService;
-    private final LightStateCache stateCache;
 
-    public LightingController(TuyaLightingService lightingService, LightStateCache stateCache) {
+    public LightingController(TuyaLightingService lightingService) {
         this.lightingService = lightingService;
-        this.stateCache = stateCache;
     }
 
     /**
@@ -67,9 +64,6 @@ public class LightingController {
                     deviceName, request.getState(), request.getBrightness(), request.getColor());
             
             lightingService.sendLightCommand(deviceName, request);
-            
-            // Update cache with the new state
-            stateCache.updateState(deviceName, request);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -121,28 +115,52 @@ public class LightingController {
     /**
      * Endpoint to get the current status of a light bulb.
      * 
-     * Returns the last known state from the cache. Note that this may not
-     * reflect the actual device state if it was changed through other means
-     * (physical switch, another app, etc.).
+     * Queries the actual device state via MQTT request/response pattern.
+     * This returns the real-time state from the device, not a cached value.
      * 
      * @param deviceName The device name (e.g., "lampada_1", "lampada_2")
      * @return HTTP response with the light status
      */
     @GetMapping("/{deviceName}/status")
     public ResponseEntity<LightStatusResponse> getLightStatus(@PathVariable String deviceName) {
-        logger.debug("Getting status for device '{}'", deviceName);
+        logger.debug("Getting real-time status for device '{}'", deviceName);
         
         try {
-            LightStatusResponse status = stateCache.getState(deviceName);
+            LightStatusResponse status = lightingService.getRealState(deviceName);
             return ResponseEntity.ok(status);
             
-        } catch (Exception e) {
+        } catch (TuyaLightingService.TuyaLightingException e) {
             logger.error("Error getting status for device '{}': {}", deviceName, e.getMessage(), e);
+            
+            // Provide more specific error messages
+            String errorMessage = e.getMessage();
+            if (errorMessage != null) {
+                if (errorMessage.contains("Timeout")) {
+                    errorMessage = "Timeout ao consultar estado do dispositivo. Verifique se o bridge está rodando.";
+                } else if (errorMessage.contains("connect") || errorMessage.contains("broker")) {
+                    errorMessage = "Erro de conexão MQTT. Verifique se o broker Mosquitto está rodando.";
+                } else if (errorMessage.contains("Device error")) {
+                    errorMessage = "Erro ao consultar dispositivo: " + errorMessage;
+                }
+            } else {
+                errorMessage = "Erro ao obter status do dispositivo";
+            }
             
             LightStatusResponse errorResponse = LightStatusResponse.builder()
                     .success(false)
                     .device(deviceName)
-                    .message("Erro ao obter status: " + e.getMessage())
+                    .message(errorMessage)
+                    .build();
+            
+            return ResponseEntity.internalServerError().body(errorResponse);
+            
+        } catch (Exception e) {
+            logger.error("Unexpected error getting status for device '{}': {}", deviceName, e.getMessage(), e);
+            
+            LightStatusResponse errorResponse = LightStatusResponse.builder()
+                    .success(false)
+                    .device(deviceName)
+                    .message("Erro inesperado ao obter status: " + e.getMessage())
                     .build();
             
             return ResponseEntity.internalServerError().body(errorResponse);
