@@ -9,7 +9,7 @@ import { toast } from "sonner";
 
 // Device configuration - could be fetched from API in the future
 const DEVICES = [
-  { deviceName: "lampada_1", displayName: "Lâmpada 1", location: "Sala de estar" },
+  { deviceName: "lampada_1", displayName: "Lâmpada 1", location: "Quarto" },
   { deviceName: "lampada_2", displayName: "Lâmpada 2", location: "Quarto" },
 ] as const;
 
