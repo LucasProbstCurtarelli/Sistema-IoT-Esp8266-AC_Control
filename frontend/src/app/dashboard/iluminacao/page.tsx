@@ -1,536 +1,217 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Lightbulb, Power, Circle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useCallback, useEffect } from "react";
+import { PowerOff, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
-import { lightingService, type LightCommandRequest } from "@/services/api";
+import { LightCard, type LightState } from "@/components/light-card";
+import { lightingService } from "@/services/api";
 import { toast } from "sonner";
-import { useDebounce } from "@/hooks/use-debounce";
 
-interface LightState {
-  state: boolean;
-  brightness: number; // 0-100
-  color: string; // "#RRGGBB"
-}
+// Device configuration - could be fetched from API in the future
+const DEVICES = [
+  { deviceName: "lampada_1", displayName: "Lâmpada 1", location: "Sala de estar" },
+  { deviceName: "lampada_2", displayName: "Lâmpada 2", location: "Quarto" },
+] as const;
 
+// Default state for lights
+const DEFAULT_LIGHT_STATE: LightState = {
+  state: false,
+  brightness: 100,
+  color: "#FFFFFF",
+};
+
+/**
+ * Iluminação (Lighting) Dashboard Page
+ * 
+ * Features:
+ * - Control multiple smart bulbs
+ * - Turn off all lights at once
+ * - Refresh state from devices
+ * - Responsive grid layout
+ */
 export default function IluminacaoPage() {
-  const [lightStates, setLightStates] = useState<Record<string, LightState>>({
-    lampada_1: { state: false, brightness: 100, color: "#FFFFFF" },
-    lampada_2: { state: false, brightness: 100, color: "#FFFFFF" },
-  });
+  // Track states for all lights
+  const [lightStates, setLightStates] = useState<Record<string, LightState>>(
+    Object.fromEntries(
+      DEVICES.map(d => [d.deviceName, { ...DEFAULT_LIGHT_STATE }])
+    )
+  );
   
-  const [localBrightness, setLocalBrightness] = useState<Record<string, number>>({
-    lampada_1: 100,
-    lampada_2: 100,
-  });
-  
-  const [localColor, setLocalColor] = useState<Record<string, string>>({
-    lampada_1: "#FFFFFF",
-    lampada_2: "#FFFFFF",
-  });
-  
-  const [isLoadingLights, setIsLoadingLights] = useState<Record<string, boolean>>({
-    lampada_1: false,
-    lampada_2: false,
-  });
+  // Loading states for bulk actions
+  const [isTurningOffAll, setIsTurningOffAll] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Refs to track previous debounced values to avoid unnecessary API calls
-  const prevDebouncedBrightness1 = useRef<number | null>(null);
-  const prevDebouncedBrightness2 = useRef<number | null>(null);
-  const prevDebouncedColor1 = useRef<string | null>(null);
-  const prevDebouncedColor2 = useRef<string | null>(null);
-
-  // Debounced values for brightness and color
-  const debouncedBrightness1 = useDebounce(localBrightness.lampada_1, 300);
-  const debouncedBrightness2 = useDebounce(localBrightness.lampada_2, 300);
-  const debouncedColor1 = useDebounce(localColor.lampada_1, 300);
-  const debouncedColor2 = useDebounce(localColor.lampada_2, 300);
-
-  // Send command with optimistic update
-  const sendCommand = useCallback(async (
-    deviceName: string,
-    command: LightCommandRequest,
-    optimisticUpdate?: (prev: LightState) => LightState
-  ) => {
-    let previousState: LightState | null = null;
-    
-    // Optimistic update and capture previous state
-    setLightStates((prev) => {
-      previousState = prev[deviceName];
-      
-      if (optimisticUpdate) {
-        return {
-          ...prev,
-          [deviceName]: optimisticUpdate(previousState),
-        };
-      }
-      return prev;
-    });
-    
-    setIsLoadingLights((prev) => ({ ...prev, [deviceName]: true }));
+  /**
+   * Fetches the current state of all lights from the backend.
+   * This syncs the UI with the actual device states.
+   */
+  const refreshLightStates = useCallback(async () => {
+    setIsRefreshing(true);
     
     try {
-      console.log(`[LightControl] Sending command to ${deviceName}:`, command);
-      const response = await lightingService.sendCommand(deviceName, command);
-      console.log(`[LightControl] Command successful:`, response);
-      // Success - state already updated optimistically
-    } catch (error: any) {
-      console.error(`[LightControl] Error caught for ${deviceName}:`, error);
-      console.error(`[LightControl] Error type:`, error?.constructor?.name);
-      console.error(`[LightControl] Error details:`, {
-        message: error?.message,
-        response: error?.response,
-        request: error?.request,
-        stack: error?.stack,
-      });
+      const results = await Promise.allSettled(
+        DEVICES.map(async (device) => {
+          const response = await lightingService.getStatus(device.deviceName);
+          return { deviceName: device.deviceName, ...response };
+        })
+      );
       
-      // Revert optimistic update on error
-      if (previousState) {
-        setLightStates((prev) => ({
-          ...prev,
-          [deviceName]: previousState!,
-        }));
+      setLightStates(prevStates => {
+        const newStates: Record<string, LightState> = {};
         
-        // Revert local values if they were changed
-        if (command.brightness !== undefined) {
-          setLocalBrightness((prev) => ({
-            ...prev,
-            [deviceName]: previousState!.brightness,
-          }));
-        }
-        if (command.color !== undefined) {
-          setLocalColor((prev) => ({
-            ...prev,
-            [deviceName]: previousState!.color,
-          }));
-        }
-      }
-      
-      // Extract error message with better error handling
-      let errorMessage = "Não foi possível comunicar com o dispositivo";
-      
-      if (error?.response) {
-        // Server responded with error status
-        const responseData = error.response.data;
-        errorMessage = responseData?.message || 
-                      (typeof responseData === 'string' ? responseData : errorMessage);
-        console.error(`[LightControl] Server error response:`, {
-          status: error.response.status,
-          statusText: error.response.statusText,
-          data: responseData,
+        results.forEach((result, index) => {
+          const deviceName = DEVICES[index].deviceName;
+          
+          if (result.status === 'fulfilled' && result.value) {
+            newStates[deviceName] = {
+              state: result.value.state ?? false,
+              brightness: result.value.brightness ?? 100,
+              color: result.value.color ?? "#FFFFFF",
+            };
+          } else {
+            // Keep existing state if fetch failed
+            newStates[deviceName] = prevStates[deviceName] || { ...DEFAULT_LIGHT_STATE };
+          }
         });
-      } else if (error?.request) {
-        // Request was made but no response received
-        errorMessage = "Servidor não está respondendo. Verifique se o backend está rodando na porta 8080.";
-        console.error(`[LightControl] No response from server:`, error.request);
-      } else if (error?.message) {
-        // Error setting up the request
-        errorMessage = error.message;
-        console.error(`[LightControl] Request setup error:`, error.message);
-      }
-      
-      toast.error("Erro ao controlar lâmpada", {
-        description: errorMessage,
-        duration: 5000,
+        
+        return newStates;
+      });
+    } catch (error) {
+      console.error("[IluminacaoPage] Error refreshing states:", error);
+      toast.error("Erro ao atualizar estados", {
+        description: "Não foi possível obter o estado atual das lâmpadas.",
       });
     } finally {
-      setIsLoadingLights((prev) => ({ ...prev, [deviceName]: false }));
+      setIsRefreshing(false);
     }
+  }, []); // No dependencies - uses functional setState to access current state
+
+  /**
+   * Turns off all lights at once.
+   */
+  const turnOffAllLights = useCallback(async () => {
+    // Check if any light is on
+    const anyLightOn = Object.values(lightStates).some(state => state.state);
+    
+    if (!anyLightOn) {
+      toast.info("Todas as lâmpadas já estão desligadas");
+      return;
+    }
+    
+    setIsTurningOffAll(true);
+    
+    try {
+      // Send off command to all lights that are on
+      const results = await Promise.allSettled(
+        DEVICES.filter(device => lightStates[device.deviceName]?.state)
+          .map(device => lightingService.sendCommand(device.deviceName, { state: false }))
+      );
+      
+      // Check for failures
+      const failures = results.filter(r => r.status === 'rejected');
+      
+      if (failures.length > 0) {
+        toast.error("Erro ao desligar algumas lâmpadas", {
+          description: `${failures.length} de ${results.length} comandos falharam.`,
+        });
+      }
+      
+      // Update local state for successful commands
+      setLightStates(prev => {
+        const newStates = { ...prev };
+        DEVICES.forEach((device, index) => {
+          if (prev[device.deviceName]?.state && results[index]?.status === 'fulfilled') {
+            newStates[device.deviceName] = { ...prev[device.deviceName], state: false };
+          }
+        });
+        return newStates;
+      });
+      
+    } catch (error) {
+      console.error("[IluminacaoPage] Error turning off all lights:", error);
+      toast.error("Erro ao desligar lâmpadas", {
+        description: "Não foi possível desligar todas as lâmpadas.",
+      });
+    } finally {
+      setIsTurningOffAll(false);
+    }
+  }, [lightStates]);
+
+  /**
+   * Handles state changes from individual LightCard components.
+   */
+  const handleLightStateChange = useCallback((deviceName: string, newState: LightState) => {
+    setLightStates(prev => ({
+      ...prev,
+      [deviceName]: newState,
+    }));
   }, []);
 
-  // Handle brightness changes with debounce for lampada_1
+  // Fetch light states automatically on page load
   useEffect(() => {
-    if (prevDebouncedBrightness1.current === debouncedBrightness1) return;
-    prevDebouncedBrightness1.current = debouncedBrightness1;
-    
-    setLightStates((prev) => {
-      if (!prev.lampada_1.state || prev.lampada_1.brightness === debouncedBrightness1) {
-        return prev;
-      }
-      return {
-        ...prev,
-        lampada_1: { ...prev.lampada_1, brightness: debouncedBrightness1 },
-      };
-    });
-    
-    // Send command separately - include current color to maintain colour mode
-    // Use localColor which is the actual current value from the color picker
-    setLightStates((prev) => {
-      if (!prev.lampada_1.state) return prev;
-      
-      const command: LightCommandRequest = { brightness: debouncedBrightness1 };
-      // Use localColor (from color picker) instead of lightStates to get the most current value
-      // Always include color if it's not pure black - this maintains colour mode
-      const currentColor = localColor.lampada_1;
-      // Check if color is different from initial white - if user selected a color, preserve it
-      const isUserSelectedColor = currentColor && currentColor !== '#FFFFFF' && currentColor !== '#ffffff';
-      if (isUserSelectedColor) {
-        command.color = currentColor;
-        console.log(`[Brightness] Including user-selected color ${currentColor} to maintain colour mode`);
-      } else {
-        console.log(`[Brightness] Using default white, not including color (current: ${currentColor})`);
-      }
-      
-      sendCommand("lampada_1", command, (p) => ({
-        ...p,
-        brightness: debouncedBrightness1,
-      }));
-      
-      return prev;
-    });
-  }, [debouncedBrightness1, sendCommand, localColor.lampada_1]);
+    refreshLightStates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run on mount
 
-  // Handle brightness changes with debounce for lampada_2
-  useEffect(() => {
-    if (prevDebouncedBrightness2.current === debouncedBrightness2) return;
-    prevDebouncedBrightness2.current = debouncedBrightness2;
-    
-    setLightStates((prev) => {
-      if (!prev.lampada_2.state || prev.lampada_2.brightness === debouncedBrightness2) {
-        return prev;
-      }
-      return {
-        ...prev,
-        lampada_2: { ...prev.lampada_2, brightness: debouncedBrightness2 },
-      };
-    });
-    
-    // Send command separately - include current color to maintain colour mode
-    // Use localColor which is the actual current value from the color picker
-    setLightStates((prev) => {
-      if (!prev.lampada_2.state) return prev;
-      
-      const command: LightCommandRequest = { brightness: debouncedBrightness2 };
-      // Use localColor (from color picker) instead of lightStates to get the most current value
-      // Always include color if it's not pure black - this maintains colour mode
-      const currentColor = localColor.lampada_2;
-      // Check if color is different from initial white - if user selected a color, preserve it
-      const isUserSelectedColor = currentColor && currentColor !== '#FFFFFF' && currentColor !== '#ffffff';
-      if (isUserSelectedColor) {
-        command.color = currentColor;
-        console.log(`[Brightness] Including user-selected color ${currentColor} to maintain colour mode`);
-      } else {
-        console.log(`[Brightness] Using default white, not including color (current: ${currentColor})`);
-      }
-      
-      sendCommand("lampada_2", command, (p) => ({
-        ...p,
-        brightness: debouncedBrightness2,
-      }));
-      
-      return prev;
-    });
-  }, [debouncedBrightness2, sendCommand, localColor.lampada_2]);
-
-  // Handle color changes with debounce for lampada_1
-  useEffect(() => {
-    if (prevDebouncedColor1.current === debouncedColor1) return;
-    prevDebouncedColor1.current = debouncedColor1;
-    
-    setLightStates((prev) => {
-      if (!prev.lampada_1.state || prev.lampada_1.color === debouncedColor1) {
-        return prev;
-      }
-      return {
-        ...prev,
-        lampada_1: { ...prev.lampada_1, color: debouncedColor1 },
-      };
-    });
-    
-    // Send command separately
-    if (lightStates.lampada_1.state) {
-      sendCommand("lampada_1", { color: debouncedColor1 }, (p) => ({
-        ...p,
-        color: debouncedColor1,
-      }));
-    }
-  }, [debouncedColor1, sendCommand, lightStates.lampada_1.state]);
-
-  // Handle color changes with debounce for lampada_2
-  useEffect(() => {
-    if (prevDebouncedColor2.current === debouncedColor2) return;
-    prevDebouncedColor2.current = debouncedColor2;
-    
-    setLightStates((prev) => {
-      if (!prev.lampada_2.state || prev.lampada_2.color === debouncedColor2) {
-        return prev;
-      }
-      return {
-        ...prev,
-        lampada_2: { ...prev.lampada_2, color: debouncedColor2 },
-      };
-    });
-    
-    // Send command separately
-    if (lightStates.lampada_2.state) {
-      sendCommand("lampada_2", { color: debouncedColor2 }, (p) => ({
-        ...p,
-        color: debouncedColor2,
-      }));
-    }
-  }, [debouncedColor2, sendCommand, lightStates.lampada_2.state]);
-
-  const toggleLight = async (deviceName: string) => {
-    console.log(`[ToggleLight] === INÍCIO === Toggling ${deviceName}`);
-    console.log(`[ToggleLight] Current state:`, lightStates[deviceName]);
-    
-    const newState = !lightStates[deviceName].state;
-    console.log(`[ToggleLight] New state will be:`, newState);
-    
-    // Sync local values when turning on
-    if (newState) {
-      setLocalBrightness((prev) => ({
-        ...prev,
-        [deviceName]: lightStates[deviceName].brightness,
-      }));
-      setLocalColor((prev) => ({
-        ...prev,
-        [deviceName]: lightStates[deviceName].color,
-      }));
-    }
-    
-    console.log(`[ToggleLight] Calling sendCommand with:`, { deviceName, state: newState });
-    
-    await sendCommand(
-      deviceName,
-      { state: newState },
-      (prev) => {
-        console.log(`[ToggleLight] Optimistic update, prev:`, prev);
-        return { ...prev, state: newState };
-      }
-    );
-    
-    console.log(`[ToggleLight] Command completed successfully`);
-    
-    // Show success toast
-    if (newState) {
-      toast.success("Lâmpada ligada com sucesso!", {
-        description: `Lâmpada ${deviceName} ligada`,
-      });
-    } else {
-      toast.success("Lâmpada desligada com sucesso!", {
-        description: `Lâmpada ${deviceName} desligada`,
-      });
-    }
-  };
-
-  const handleBrightnessChange = (deviceName: string, value: number[]) => {
-    const newBrightness = value[0];
-    setLocalBrightness((prev) => ({ ...prev, [deviceName]: newBrightness }));
-    // Optimistic update - only if light is on
-    setLightStates((prev) => {
-      if (!prev[deviceName].state) return prev;
-      return {
-        ...prev,
-        [deviceName]: { ...prev[deviceName], brightness: newBrightness },
-      };
-    });
-  };
-
-  const handleColorChange = (deviceName: string, color: string) => {
-    setLocalColor((prev) => ({ ...prev, [deviceName]: color }));
-    // Optimistic update - only if light is on
-    setLightStates((prev) => {
-      if (!prev[deviceName].state) return prev;
-      return {
-        ...prev,
-        [deviceName]: { ...prev[deviceName], color },
-      };
-    });
-  };
+  // Calculate summary stats
+  const lightsOn = Object.values(lightStates).filter(s => s.state).length;
+  const totalLights = DEVICES.length;
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Iluminação</h1>
-        <p className="text-muted-foreground mt-1">
-          Controle das lâmpadas inteligentes
-        </p>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Iluminação</h1>
+          <p className="text-muted-foreground mt-1">
+            Controle das lâmpadas inteligentes • {lightsOn}/{totalLights} ligadas
+          </p>
+        </div>
+        
+        {/* Bulk actions */}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={refreshLightStates}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="ml-2 hidden sm:inline">Atualizar</span>
+          </Button>
+          
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={turnOffAllLights}
+            disabled={isTurningOffAll || lightsOn === 0}
+          >
+            {isTurningOffAll ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <PowerOff className="h-4 w-4" />
+            )}
+            <span className="ml-2 hidden sm:inline">Desligar Todas</span>
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Lighting Control - Lampada 1 */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Lightbulb className="h-5 w-5" />
-              <CardTitle>Lâmpada 1</CardTitle>
-            </div>
-            <CardDescription>Sala de estar</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-center">
-              <div className="flex justify-center">
-                <Circle 
-                  className={`h-12 w-12 transition-colors ${
-                    lightStates.lampada_1.state 
-                      ? "fill-current text-current" 
-                      : "text-muted-foreground"
-                  }`}
-                  style={{
-                    color: lightStates.lampada_1.state 
-                      ? lightStates.lampada_1.color 
-                      : undefined,
-                  }}
-                />
-              </div>
-              <div className="text-sm text-muted-foreground mt-2">
-                {lightStates.lampada_1.state ? "Ligada" : "Desligada"}
-              </div>
-            </div>
-
-            <Button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('[Button] Clicked for lampada_1, current state:', lightStates.lampada_1.state);
-                toggleLight("lampada_1").catch((err) => {
-                  console.error('[Button] Error in toggleLight:', err);
-                });
-              }}
-              disabled={isLoadingLights.lampada_1}
-              className="w-full"
-              size="lg"
-              variant={lightStates.lampada_1.state ? "secondary" : "default"}
-              type="button"
-            >
-              <Power className="mr-2 h-4 w-4" />
-              {isLoadingLights.lampada_1 ? "Processando..." : (lightStates.lampada_1.state ? "Desligar" : "Ligar")}
-            </Button>
-
-            {lightStates.lampada_1.state && (
-              <>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="brightness-1">Brilho</Label>
-                    <span className="text-sm text-muted-foreground">
-                      {lightStates.lampada_1.brightness}%
-                    </span>
-                  </div>
-                  <Slider
-                    id="brightness-1"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={[lightStates.lampada_1.brightness]}
-                    onValueChange={(value) => handleBrightnessChange("lampada_1", value)}
-                    disabled={isLoadingLights.lampada_1}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="color-1">Cor</Label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      id="color-1"
-                      type="color"
-                      value={lightStates.lampada_1.color}
-                      onChange={(e) => handleColorChange("lampada_1", e.target.value)}
-                      disabled={isLoadingLights.lampada_1}
-                      className="h-10 w-20 cursor-pointer rounded-md border border-input bg-background disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                    <span className="text-sm text-muted-foreground font-mono">
-                      {lightStates.lampada_1.color.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Lighting Control - Lampada 2 */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Lightbulb className="h-5 w-5" />
-              <CardTitle>Lâmpada 2</CardTitle>
-            </div>
-            <CardDescription>Quarto</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-center">
-              <div className="flex justify-center">
-                <Circle 
-                  className={`h-12 w-12 transition-colors ${
-                    lightStates.lampada_2.state 
-                      ? "fill-current text-current" 
-                      : "text-muted-foreground"
-                  }`}
-                  style={{
-                    color: lightStates.lampada_2.state 
-                      ? lightStates.lampada_2.color 
-                      : undefined,
-                  }}
-                />
-              </div>
-              <div className="text-sm text-muted-foreground mt-2">
-                {lightStates.lampada_2.state ? "Ligada" : "Desligada"}
-              </div>
-            </div>
-
-            <Button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('[Button] Clicked for lampada_2, current state:', lightStates.lampada_2.state);
-                toggleLight("lampada_2").catch((err) => {
-                  console.error('[Button] Error in toggleLight:', err);
-                });
-              }}
-              disabled={isLoadingLights.lampada_2}
-              className="w-full"
-              size="lg"
-              variant={lightStates.lampada_2.state ? "secondary" : "default"}
-              type="button"
-            >
-              <Power className="mr-2 h-4 w-4" />
-              {isLoadingLights.lampada_2 ? "Processando..." : (lightStates.lampada_2.state ? "Desligar" : "Ligar")}
-            </Button>
-
-            {lightStates.lampada_2.state && (
-              <>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="brightness-2">Brilho</Label>
-                    <span className="text-sm text-muted-foreground">
-                      {lightStates.lampada_2.brightness}%
-                    </span>
-                  </div>
-                  <Slider
-                    id="brightness-2"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={[lightStates.lampada_2.brightness]}
-                    onValueChange={(value) => handleBrightnessChange("lampada_2", value)}
-                    disabled={isLoadingLights.lampada_2}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="color-2">Cor</Label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      id="color-2"
-                      type="color"
-                      value={lightStates.lampada_2.color}
-                      onChange={(e) => handleColorChange("lampada_2", e.target.value)}
-                      disabled={isLoadingLights.lampada_2}
-                      className="h-10 w-20 cursor-pointer rounded-md border border-input bg-background disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                    <span className="text-sm text-muted-foreground font-mono">
-                      {lightStates.lampada_2.color.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+      {/* Light cards grid */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {DEVICES.map((device) => (
+          <LightCard
+            key={device.deviceName}
+            deviceName={device.deviceName}
+            displayName={device.displayName}
+            location={device.location}
+            initialState={lightStates[device.deviceName]}
+            onStateChange={handleLightStateChange}
+          />
+        ))}
       </div>
     </div>
   );

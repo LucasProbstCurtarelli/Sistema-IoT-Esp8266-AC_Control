@@ -117,18 +117,13 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             logger.debug("Adding power state: {}", request.getState());
         }
         
-        // DPS 21: Mode - MUST be set BEFORE color and brightness
-        // CRITICAL: Always set mode to "colour" when brightness is changed, even if no color is provided
-        // This prevents the lamp from reverting to white mode when brightness is adjusted
+        // DPS 21: Mode - Set to "colour" when color OR brightness is provided
+        // This ensures the lamp stays in colour mode and doesn't revert to white
         boolean hasBrightness = request.getBrightness() != null;
         if (hasColor || hasBrightness) {
             dpsNode.put("21", "colour");
             hasChanges = true;
-            if (hasColor) {
-                logger.debug("Setting mode to 'colour' to maintain color mode");
-            } else {
-                logger.debug("Setting mode to 'colour' to prevent reverting to white when brightness changes");
-            }
+            logger.debug("Setting mode to 'colour' to maintain color mode");
         }
         
         // DPS 24: Color in hexadecimal format (HHHHSSSSVVVV)
@@ -161,14 +156,8 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             throw new IllegalArgumentException("No valid fields to send");
         }
         
-        // Use "multiple" format for multiple DPS updates
-        if (dpsNode.size() > 1) {
-            payload.put("multiple", true);
-            payload.set("data", dpsNode);
-        } else {
-            // Single DPS update
-            payload.set("dps", dpsNode);
-        }
+        // Always use "dps" format - the bridge handles multiple DPS atomically
+        payload.set("dps", dpsNode);
         
         String jsonPayload;
         try {

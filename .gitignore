@@ -75,6 +75,7 @@ Thumbs.db
 
 # Sensitive configuration files
 tuya-mqtt/devices.conf
+tuya-config.js
 sistema-esp8266/app/src/main/resources/application-dev.properties
 
 # Build outputs
