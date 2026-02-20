@@ -1,6 +1,8 @@
 package com.iot.app.controller;
 
 import com.iot.app.dto.LightCommandRequest;
+import com.iot.app.dto.LightStatusResponse;
+import com.iot.app.service.LightStateCache;
 import com.iot.app.service.TuyaLightingService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -19,9 +21,10 @@ import java.util.Map;
  * 
  * Available endpoints:
  * - POST /api/lights/{deviceName} - Controls a light bulb (state, brightness, color)
+ * - GET /api/lights/{deviceName}/status - Gets the current state of a light bulb
  * 
  * @author Sistema de Automação Residencial
- * @version 2.0
+ * @version 2.1
  */
 @RestController
 @RequestMapping("/api/lights")
@@ -30,9 +33,11 @@ public class LightingController {
     private static final Logger logger = LoggerFactory.getLogger(LightingController.class);
     
     private final TuyaLightingService lightingService;
+    private final LightStateCache stateCache;
 
-    public LightingController(TuyaLightingService lightingService) {
+    public LightingController(TuyaLightingService lightingService, LightStateCache stateCache) {
         this.lightingService = lightingService;
+        this.stateCache = stateCache;
     }
 
     /**
@@ -62,6 +67,9 @@ public class LightingController {
                     deviceName, request.getState(), request.getBrightness(), request.getColor());
             
             lightingService.sendLightCommand(deviceName, request);
+            
+            // Update cache with the new state
+            stateCache.updateState(deviceName, request);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -98,7 +106,7 @@ public class LightingController {
             
             error.put("success", false);
             error.put("message", errorMessage);
-            error.put("details", e.getMessage()); // Include original message for debugging
+            error.put("details", e.getMessage());
             return ResponseEntity.internalServerError().body(error);
             
         } catch (Exception e) {
@@ -107,6 +115,37 @@ public class LightingController {
             error.put("success", false);
             error.put("message", "Erro inesperado ao controlar lâmpada: " + e.getMessage());
             return ResponseEntity.internalServerError().body(error);
+        }
+    }
+    
+    /**
+     * Endpoint to get the current status of a light bulb.
+     * 
+     * Returns the last known state from the cache. Note that this may not
+     * reflect the actual device state if it was changed through other means
+     * (physical switch, another app, etc.).
+     * 
+     * @param deviceName The device name (e.g., "lampada_1", "lampada_2")
+     * @return HTTP response with the light status
+     */
+    @GetMapping("/{deviceName}/status")
+    public ResponseEntity<LightStatusResponse> getLightStatus(@PathVariable String deviceName) {
+        logger.debug("Getting status for device '{}'", deviceName);
+        
+        try {
+            LightStatusResponse status = stateCache.getState(deviceName);
+            return ResponseEntity.ok(status);
+            
+        } catch (Exception e) {
+            logger.error("Error getting status for device '{}': {}", deviceName, e.getMessage(), e);
+            
+            LightStatusResponse errorResponse = LightStatusResponse.builder()
+                    .success(false)
+                    .device(deviceName)
+                    .message("Erro ao obter status: " + e.getMessage())
+                    .build();
+            
+            return ResponseEntity.internalServerError().body(errorResponse);
         }
     }
 }

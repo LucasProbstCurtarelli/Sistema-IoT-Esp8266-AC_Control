@@ -9,50 +9,57 @@
  * Uso:
  *   node tuya-mqtt-bridge.js
  * 
+ * Configuração:
+ *   Copie tuya-config.example.js para tuya-config.js e preencha suas credenciais.
+ * 
  * Este script deve rodar em background enquanto o sistema está ativo.
  */
 
 const mqtt = require('mqtt');
 const TuyAPI = require('tuyapi');
+const path = require('path');
+const fs = require('fs');
 
-const MQTT_BROKER = 'mqtt://localhost:1883';
+// Load configuration from tuya-config.js
+const configPath = path.join(__dirname, 'tuya-config.js');
 
-// Configuração das lâmpadas (do devices.conf)
-const DEVICES = {
-    lampada_1: {
-        id: 'REMOVED_DEVICE_ID_1',
-        key: 'REMOVED_DEVICE_KEY_1',
-        version: '3.3',
-        ip: null, // Será descoberto automaticamente
+if (!fs.existsSync(configPath)) {
+    console.error('❌ Arquivo de configuração não encontrado!');
+    console.error('   Por favor, copie tuya-config.example.js para tuya-config.js');
+    console.error('   e preencha suas credenciais de dispositivos Tuya.');
+    process.exit(1);
+}
+
+const config = require('./tuya-config.js');
+
+const MQTT_BROKER = config.MQTT_BROKER || 'mqtt://localhost:1883';
+const COMMAND_DEBOUNCE_MS = config.COMMAND_DEBOUNCE_MS || 200;
+
+// Initialize devices from configuration
+const DEVICES = {};
+for (const [deviceName, deviceConfig] of Object.entries(config.DEVICES)) {
+    DEVICES[deviceName] = {
+        id: deviceConfig.id,
+        key: deviceConfig.key,
+        version: deviceConfig.version || '3.3',
+        ip: deviceConfig.ip || null,
         device: null,
         lastCommandTime: 0,
         pendingCommand: null
-    },
-    lampada_2: {
-        id: 'REMOVED_DEVICE_ID_2',
-        key: 'REMOVED_DEVICE_KEY_2',
-        version: '3.3',
-        ip: null,
-        device: null,
-        lastCommandTime: 0,
-        pendingCommand: null
-    }
-};
+    };
+}
 
 let mqttClient = null;
-
-// Debounce delay to prevent command conflicts (ms)
-const COMMAND_DEBOUNCE_MS = 200;
 
 /**
  * Conecta à lâmpada Tuya
  */
-async function connectDevice(deviceConfig) {
+async function connectDevice(deviceName, deviceConfig) {
     if (deviceConfig.device && deviceConfig.device.isConnected()) {
         return true;
     }
 
-    console.log(`[Bridge] Conectando à lâmpada ${deviceConfig.id}...`);
+    console.log(`[Bridge] Conectando à lâmpada ${deviceName} (${deviceConfig.id})...`);
     
     const options = {
         id: deviceConfig.id,
@@ -67,29 +74,30 @@ async function connectDevice(deviceConfig) {
     const device = new TuyAPI(options);
 
     device.on('connected', () => {
-        console.log(`[Bridge] ✅ Conectado à lâmpada ${deviceConfig.id}`);
+        console.log(`[Bridge] ✅ Conectado à lâmpada ${deviceName}`);
     });
 
     device.on('disconnected', () => {
-        console.log(`[Bridge] ❌ Desconectado da lâmpada ${deviceConfig.id}`);
+        console.log(`[Bridge] ❌ Desconectado da lâmpada ${deviceName}`);
+        deviceConfig.device = null;
     });
 
     device.on('error', (error) => {
-        console.error(`[Bridge] ❌ Erro na lâmpada ${deviceConfig.id}:`, error.message);
+        console.error(`[Bridge] ❌ Erro na lâmpada ${deviceName}:`, error.message);
     });
 
     try {
         if (!deviceConfig.ip) {
             const ip = await device.find();
             deviceConfig.ip = ip;
-            console.log(`[Bridge] IP da lâmpada ${deviceConfig.id} descoberto: ${ip}`);
+            console.log(`[Bridge] IP da lâmpada ${deviceName} descoberto: ${ip}`);
         }
         
         await device.connect();
         deviceConfig.device = device;
         return true;
     } catch (error) {
-        console.error(`[Bridge] ❌ Erro ao conectar à lâmpada ${deviceConfig.id}:`, error.message);
+        console.error(`[Bridge] ❌ Erro ao conectar à lâmpada ${deviceName}:`, error.message);
         return false;
     }
 }
@@ -101,7 +109,7 @@ async function connectAllDevices() {
     console.log('\n[Bridge] Conectando às lâmpadas...\n');
     
     for (const [deviceName, config] of Object.entries(DEVICES)) {
-        await connectDevice(config);
+        await connectDevice(deviceName, config);
         // Aguarda um pouco entre conexões
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -133,7 +141,7 @@ async function processCommand(deviceName, payload) {
     // Garante que está conectado
     if (!deviceConfig.device) {
         console.log(`[Bridge] Conectando à lâmpada ${deviceName}...`);
-        const connected = await connectDevice(deviceConfig);
+        const connected = await connectDevice(deviceName, deviceConfig);
         if (!connected) {
             console.error(`[Bridge] ❌ Não foi possível conectar à lâmpada ${deviceName}`);
             return;
@@ -156,6 +164,16 @@ async function processCommand(deviceName, payload) {
             const hasColor = payload.data['24'];
             const hasBrightness = payload.data['22'];
             const hasPower = payload.data['20'];
+            
+            // Step 0: Set power first if present with other DPS
+            if (hasPower !== undefined && (hasMode || hasColor || hasBrightness)) {
+                console.log(`[Bridge] Step 0: Setting power to ${hasPower}`);
+                await deviceConfig.device.set({
+                    dps: 20,
+                    set: hasPower
+                });
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
             
             // Step 1: Set mode FIRST if present (critical for maintaining colour mode)
             if (hasMode) {
@@ -187,20 +205,18 @@ async function processCommand(deviceName, payload) {
                     set: hasBrightness
                 });
                 
-                // CRITICAL: Wait 1 second before re-confirming color to allow lamp to process brightness
-                // Some Tuya devices need time to process brightness before accepting color commands
-                console.log(`[Bridge] ⏳ Waiting 1 second before re-confirming color mode...`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Wait before re-confirming color to allow lamp to process brightness
+                console.log(`[Bridge] ⏳ Waiting before re-confirming color mode...`);
+                await new Promise(resolve => setTimeout(resolve, 500));
                 
-                // CRITICAL: Re-send mode "colour" AND color AFTER brightness to prevent reverting to white
-                // Some Tuya devices revert to white mode when brightness is changed
+                // Re-send mode "colour" AND color AFTER brightness to prevent reverting to white
                 if (hasMode && hasMode === 'colour') {
                     console.log(`[Bridge] Step 4: Re-confirming mode 'colour' after brightness change`);
                     await deviceConfig.device.set({
                         dps: 21,
                         set: 'colour'
                     });
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     // Also re-send color to ensure it's maintained
                     if (hasColor) {
@@ -214,22 +230,13 @@ async function processCommand(deviceName, payload) {
                 }
             }
             
-            // Step 4: Set power if present (usually done first, but we do it last if mode/color/brightness are present)
-            if (hasPower && !hasMode && !hasColor && !hasBrightness) {
-                // Only set power alone if no other DPS are present
+            // Set power alone if no other DPS are present
+            if (hasPower !== undefined && !hasMode && !hasColor && !hasBrightness) {
                 console.log(`[Bridge] Setting power to ${hasPower}`);
                 await deviceConfig.device.set({
                     dps: 20,
                     set: hasPower
                 });
-            } else if (hasPower && (hasMode || hasColor || hasBrightness)) {
-                // If power is set with other DPS, set it first
-                console.log(`[Bridge] Step 0: Setting power to ${hasPower} (before mode/color/brightness)`);
-                await deviceConfig.device.set({
-                    dps: 20,
-                    set: hasPower
-                });
-                await new Promise(resolve => setTimeout(resolve, 100));
             }
             
             console.log(`[Bridge] ✅ Comandos sequenciais enviados com sucesso`);
@@ -264,6 +271,9 @@ async function processCommand(deviceName, payload) {
     } catch (error) {
         console.error(`[Bridge] ❌ Erro ao enviar comando para ${deviceName}:`, error.message);
         console.error(`[Bridge] Stack:`, error.stack);
+        
+        // Try to reconnect on next command
+        deviceConfig.device = null;
     }
 }
 
@@ -274,7 +284,8 @@ function startBridge() {
     console.log('\n' + '='.repeat(60));
     console.log('🌉 TUYA MQTT BRIDGE');
     console.log('='.repeat(60));
-    console.log(`Conectando ao broker MQTT: ${MQTT_BROKER}\n`);
+    console.log(`Conectando ao broker MQTT: ${MQTT_BROKER}`);
+    console.log(`Dispositivos configurados: ${Object.keys(DEVICES).join(', ')}\n`);
     
     mqttClient = mqtt.connect(MQTT_BROKER, {
         clientId: 'tuya-mqtt-bridge',

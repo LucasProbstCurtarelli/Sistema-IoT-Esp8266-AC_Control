@@ -65,6 +65,15 @@ export const acService = {
   },
 };
 
+export interface LightStatusResponse {
+  success: boolean;
+  device: string;
+  state: boolean;
+  brightness: number;
+  color: string;
+  lastUpdated?: string;
+}
+
 export const lightingService = {
   /**
    * Sends a light command with optional state, brightness, and color.
@@ -76,22 +85,54 @@ export const lightingService = {
   sendCommand: async (deviceName: string, command: LightCommandRequest) => {
     try {
       console.log(`[LightingService] Sending command to ${deviceName}:`, command);
-      console.log(`[LightingService] Full URL will be: ${API_URL}/api/lights/${deviceName}`);
       
       const response = await api.post(`/api/lights/${deviceName}`, command);
       
       console.log(`[LightingService] Success response:`, response.data);
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as { 
+        message?: string;
+        response?: { data?: unknown; status?: number };
+        config?: unknown;
+      };
       console.error(`[LightingService] Error in sendCommand:`, {
         deviceName,
         command,
-        error: error?.message,
-        response: error?.response?.data,
-        status: error?.response?.status,
-        config: error?.config,
+        error: axiosError?.message,
+        response: axiosError?.response?.data,
+        status: axiosError?.response?.status,
       });
-      throw error; // Re-throw to be handled by caller
+      throw error;
+    }
+  },
+
+  /**
+   * Gets the current status of a light.
+   * 
+   * @param deviceName The device name (e.g., "lampada_1", "lampada_2")
+   * @returns Promise with the light status
+   */
+  getStatus: async (deviceName: string): Promise<LightStatusResponse> => {
+    try {
+      console.log(`[LightingService] Getting status for ${deviceName}`);
+      
+      const response = await api.get(`/api/lights/${deviceName}/status`);
+      
+      console.log(`[LightingService] Status response:`, response.data);
+      return response.data;
+    } catch (error: unknown) {
+      const axiosError = error as { 
+        message?: string;
+        response?: { data?: unknown; status?: number };
+      };
+      console.error(`[LightingService] Error getting status:`, {
+        deviceName,
+        error: axiosError?.message,
+        response: axiosError?.response?.data,
+        status: axiosError?.response?.status,
+      });
+      throw error;
     }
   },
   
