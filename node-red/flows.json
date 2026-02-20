@@ -41,31 +41,6 @@
         "willPayload": ""
     },
     {
-        "id": "mqtt_broker_aedes",
-        "type": "aedes broker",
-        "z": "tab_ac_control",
-        "name": "Broker MQTT Interno",
-        "mqtt_port": "1883",
-        "mqtt_ws_bind": "port",
-        "mqtt_ws_port": "",
-        "mqtt_ws_path": "",
-        "cert": "",
-        "key": "",
-        "ca": "",
-        "certname": "",
-        "keyname": "",
-        "caname": "",
-        "persistence_bind": "memory",
-        "dburl": "",
-        "usetls": false,
-        "x": 140,
-        "y": 80,
-        "wires": [
-            [],
-            []
-        ]
-    },
-    {
         "id": "inject_on_22",
         "type": "inject",
         "z": "tab_ac_control",
@@ -208,5 +183,30 @@
         "x": 390,
         "y": 460,
         "wires": []
+    },
+    {
+        "id": "mqtt_broker_aedes",
+        "type": "aedes broker",
+        "z": "tab_ac_control",
+        "name": "Broker MQTT Interno",
+        "mqtt_port": "1883",
+        "mqtt_ws_bind": "port",
+        "mqtt_ws_port": "",
+        "mqtt_ws_path": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "persistence_bind": "memory",
+        "dburl": "",
+        "usetls": false,
+        "x": 140,
+        "y": 80,
+        "wires": [
+            [],
+            []
+        ]
     }
 ]

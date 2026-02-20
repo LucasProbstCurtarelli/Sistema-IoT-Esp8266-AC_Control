@@ -1,9 +1,15 @@
 {
     "name": "node-red-project",
     "description": "A Node-RED Project",
-    "version": "0.0.1",
+    "version": "0.0.0",
     "private": true,
+    "scripts": {
+        "start": "node-red"
+    },
     "dependencies": {
-        "node-red-contrib-aedes": "~0.15.0"
+        "node-red-contrib-aedes": "~0.15.0",
+        "node-red-contrib-tuya-smart-device": "~5.4.0",
+        "node-ssdp": "^4.0.1",
+        "tuyapi": "^7.7.1"
     }
 }

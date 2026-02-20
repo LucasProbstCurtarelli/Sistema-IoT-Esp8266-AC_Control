@@ -426,5 +426,24 @@
                 "file": "C:\\Users\\lecur\\AppData\\Roaming\\npm\\node_modules\\node-red\\node_modules\\@node-red\\nodes\\core\\storage\\23-watch.js"
             }
         }
+    },
+    "node-red-contrib-aedes": {
+        "name": "node-red-contrib-aedes",
+        "version": "0.15.0",
+        "local": true,
+        "user": true,
+        "nodes": {
+            "aedes-mqtt-broker": {
+                "name": "aedes-mqtt-broker",
+                "types": [
+                    "aedes broker"
+                ],
+                "enabled": true,
+                "local": true,
+                "user": false,
+                "module": "node-red-contrib-aedes",
+                "file": "C:\\Users\\lecur\\Desktop\\ProjetoAutomacaoResidencialLucas\\node-red\\node_modules\\node-red-contrib-aedes\\aedes.js"
+            }
+        }
     }
 }

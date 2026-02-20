@@ -445,5 +445,35 @@
                 "file": "C:\\Users\\lecur\\Desktop\\ProjetoAutomacaoResidencialLucas\\node-red\\node_modules\\node-red-contrib-aedes\\aedes.js"
             }
         }
+    },
+    "node-red-contrib-tuya-smart-device": {
+        "name": "node-red-contrib-tuya-smart-device",
+        "version": "5.4.0",
+        "local": true,
+        "user": true,
+        "nodes": {
+            "tuya-smart-device": {
+                "name": "tuya-smart-device",
+                "types": [
+                    "tuya-smart-device"
+                ],
+                "enabled": true,
+                "local": true,
+                "user": false,
+                "module": "node-red-contrib-tuya-smart-device",
+                "file": "C:\\Users\\lecur\\Desktop\\ProjetoAutomacaoResidencialLucas\\node-red\\node_modules\\node-red-contrib-tuya-smart-device\\src\\tuya-smart-device.js"
+            },
+            "tuya-smart-device-generic": {
+                "name": "tuya-smart-device-generic",
+                "types": [
+                    "tuya-smart-device-generic"
+                ],
+                "enabled": true,
+                "local": true,
+                "user": false,
+                "module": "node-red-contrib-tuya-smart-device",
+                "file": "C:\\Users\\lecur\\Desktop\\ProjetoAutomacaoResidencialLucas\\node-red\\node_modules\\node-red-contrib-tuya-smart-device\\src\\tuya-smart-device-generic.js"
+            }
+        }
     }
 }
