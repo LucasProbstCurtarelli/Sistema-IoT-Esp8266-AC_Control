@@ -50,12 +50,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 }
+            } catch (io.jsonwebtoken.security.SignatureException | io.jsonwebtoken.ExpiredJwtException | 
+                     io.jsonwebtoken.MalformedJwtException | io.jsonwebtoken.UnsupportedJwtException e) {
+                // Token is invalid (signature mismatch, expired, malformed, etc.)
+                // Clear the invalid cookie to prevent repeated failed attempts
+                logger.debug("Invalid JWT token: {}. Clearing cookie.", e.getMessage());
+                clearAuthCookie(response);
             } catch (Exception e) {
+                // Other errors (e.g., user not found)
                 logger.error("Cannot set user authentication: {}", e.getMessage());
             }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private void clearAuthCookie(HttpServletResponse response) {
+        jakarta.servlet.http.Cookie cookie = new jakarta.servlet.http.Cookie("authToken", "");
+        cookie.setHttpOnly(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(0);
+        response.addCookie(cookie);
     }
 
     private String getTokenFromRequest(HttpServletRequest request) {

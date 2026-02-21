@@ -4,32 +4,17 @@ import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { User } from "@/types/auth";
 import { toast } from "sonner";
+import { api } from "@/services/api";
 
 interface AuthContextType {
     user: User | null;
     isAuthenticated: boolean;
     isLoading: boolean;
     signOut: () => Promise<void>;
+    refreshUser: () => Promise<void>;
 }
 
 const AuthContext = React.createContext<AuthContextType>({} as AuthContextType);
-
-function getCookie(name: string) {
-    if (typeof document === "undefined") return null;
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) {
-        const cookieValue = parts.pop()?.split(";").shift();
-        if (cookieValue) {
-            try {
-                return decodeURIComponent(cookieValue);
-            } catch {
-                return cookieValue;
-            }
-        }
-    }
-    return null;
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = React.useState<User | null>(null);
@@ -37,30 +22,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
 
-    const loadUserFromCookie = React.useCallback(() => {
+    const fetchUserFromBackend = React.useCallback(async () => {
         try {
-            const userCookie = getCookie("automation.user");
-            if (userCookie) {
-                const parsedUser = JSON.parse(userCookie);
-                setUser(parsedUser);
-                return parsedUser;
+            const response = await api.get("/api/me");
+            if (response.status === 200 && response.data) {
+                const userData: User = {
+                    id: response.data.id,
+                    name: response.data.name,
+                    email: response.data.email,
+                };
+                setUser(userData);
+                return userData;
             } else {
                 setUser(null);
                 return null;
             }
-        } catch (error) {
+        } catch (error: any) {
+            // User is not authenticated or token is invalid
+            // This is expected when user is not logged in, so we don't log it as an error
+            const status = error?.response?.status;
+            if (status === 401 || status === 403) {
+                // Expected: user is not authenticated
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('[AuthContext] User not authenticated (expected if not logged in)');
+                }
+            } else {
+                // Unexpected error (network, server error, etc.)
+                console.error('[AuthContext] Error fetching user:', {
+                    status,
+                    message: error?.message,
+                });
+            }
             setUser(null);
             return null;
         }
     }, []);
 
+    const refreshUser = React.useCallback(async () => {
+        await fetchUserFromBackend();
+    }, [fetchUserFromBackend]);
+
     const signOut = React.useCallback(async () => {
         try {
             setUser(null);
-            // Clear user cookie
-            document.cookie = "automation.user=; path=/; max-age=0";
             // Note: authToken cookie is httpOnly, so it cannot be cleared from JavaScript
             // Backend should handle token invalidation if needed
+            // For now, just redirect to login - the backend will reject invalid tokens
             router.push("/login");
             toast.success("Logout realizado com sucesso");
         } catch (error) {
@@ -69,15 +76,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [router]);
 
     React.useEffect(() => {
-        loadUserFromCookie();
-        setIsLoading(false);
-    }, [loadUserFromCookie]);
+        // Fetch user from backend on mount
+        fetchUserFromBackend().finally(() => {
+            setIsLoading(false);
+        });
+    }, [fetchUserFromBackend]);
 
     React.useEffect(() => {
-        if (!isLoading) {
-            loadUserFromCookie();
+        // Refresh user data when pathname changes (e.g., after login)
+        if (!isLoading && pathname !== "/login") {
+            fetchUserFromBackend();
         }
-    }, [pathname, isLoading, loadUserFromCookie]);
+    }, [pathname, isLoading, fetchUserFromBackend]);
 
     const value = React.useMemo(
         () => ({
@@ -85,8 +95,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             isAuthenticated: !!user,
             isLoading,
             signOut,
+            refreshUser,
         }),
-        [user, isLoading, signOut]
+        [user, isLoading, signOut, refreshUser]
     );
 
     return (

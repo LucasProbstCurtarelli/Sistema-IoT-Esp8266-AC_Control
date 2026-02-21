@@ -4,14 +4,10 @@ import { useState, useCallback, useEffect } from "react";
 import { PowerOff, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LightCard, type LightState } from "@/components/light-card";
-import { lightingService } from "@/services/api";
+import { lightingService, deviceService } from "@/services/api";
+import type { DeviceResponse } from "@/services/api";
 import { toast } from "sonner";
-
-// Device configuration - could be fetched from API in the future
-const DEVICES = [
-  { deviceName: "lampada_1", displayName: "Lâmpada 1", location: "Quarto" },
-  { deviceName: "lampada_2", displayName: "Lâmpada 2", location: "Quarto" },
-] as const;
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Default state for lights
 const DEFAULT_LIGHT_STATE: LightState = {
@@ -30,16 +26,45 @@ const DEFAULT_LIGHT_STATE: LightState = {
  * - Responsive grid layout
  */
 export default function IluminacaoPage() {
+  // Device list from backend
+  const [devices, setDevices] = useState<DeviceResponse[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
+  
   // Track states for all lights
-  const [lightStates, setLightStates] = useState<Record<string, LightState>>(
-    Object.fromEntries(
-      DEVICES.map(d => [d.deviceName, { ...DEFAULT_LIGHT_STATE }])
-    )
-  );
+  const [lightStates, setLightStates] = useState<Record<string, LightState>>({});
   
   // Loading states for bulk actions
   const [isTurningOffAll, setIsTurningOffAll] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  /**
+   * Fetches devices from the backend.
+   */
+  const loadDevices = useCallback(async () => {
+    setIsLoadingDevices(true);
+    try {
+      const deviceList = await deviceService.getAllDevices();
+      setDevices(deviceList);
+      
+      // Initialize light states for all devices
+      setLightStates(prevStates => {
+        const newStates: Record<string, LightState> = { ...prevStates };
+        deviceList.forEach(device => {
+          if (!newStates[device.deviceName]) {
+            newStates[device.deviceName] = { ...DEFAULT_LIGHT_STATE };
+          }
+        });
+        return newStates;
+      });
+    } catch (error) {
+      console.error("[IluminacaoPage] Error loading devices:", error);
+      toast.error("Erro ao carregar dispositivos", {
+        description: "Não foi possível obter a lista de dispositivos.",
+      });
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  }, []);
 
   /**
    * Fetches the current state of all lights from the backend.
@@ -50,7 +75,7 @@ export default function IluminacaoPage() {
     
     try {
       const results = await Promise.allSettled(
-        DEVICES.map(async (device) => {
+        devices.map(async (device) => {
           const response = await lightingService.getStatus(device.deviceName);
           return { deviceName: device.deviceName, ...response };
         })
@@ -60,7 +85,8 @@ export default function IluminacaoPage() {
         const newStates: Record<string, LightState> = {};
         
         results.forEach((result, index) => {
-          const deviceName = DEVICES[index].deviceName;
+          const deviceName = devices[index]?.deviceName;
+          if (!deviceName) return;
           
           if (result.status === 'fulfilled' && result.value) {
             newStates[deviceName] = {
@@ -84,7 +110,7 @@ export default function IluminacaoPage() {
     } finally {
       setIsRefreshing(false);
     }
-  }, []); // No dependencies - uses functional setState to access current state
+  }, [devices]); // Depend on devices array
 
   /**
    * Turns off all lights at once.
@@ -103,7 +129,7 @@ export default function IluminacaoPage() {
     try {
       // Send off command to all lights that are on
       const results = await Promise.allSettled(
-        DEVICES.filter(device => lightStates[device.deviceName]?.state)
+        devices.filter(device => lightStates[device.deviceName]?.state)
           .map(device => lightingService.sendCommand(device.deviceName, { state: false }))
       );
       
@@ -119,7 +145,7 @@ export default function IluminacaoPage() {
       // Update local state for successful commands
       setLightStates(prev => {
         const newStates = { ...prev };
-        DEVICES.forEach((device, index) => {
+        devices.forEach((device, index) => {
           if (prev[device.deviceName]?.state && results[index]?.status === 'fulfilled') {
             newStates[device.deviceName] = { ...prev[device.deviceName], state: false };
           }
@@ -135,7 +161,7 @@ export default function IluminacaoPage() {
     } finally {
       setIsTurningOffAll(false);
     }
-  }, [lightStates]);
+  }, [lightStates, devices]);
 
   /**
    * Handles state changes from individual LightCard components.
@@ -147,20 +173,27 @@ export default function IluminacaoPage() {
     }));
   }, []);
 
-  // Fetch light states automatically on page load
+  // Load devices on mount
   useEffect(() => {
-    refreshLightStates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - only run on mount
+    loadDevices();
+  }, [loadDevices]);
+
+  // Fetch light states after devices are loaded
+  useEffect(() => {
+    if (devices.length > 0) {
+      refreshLightStates();
+    }
+  }, [devices.length, refreshLightStates]);
 
   // Calculate summary stats
   const lightsOn = Object.values(lightStates).filter(s => s.state).length;
-  const totalLights = DEVICES.length;
+  const totalLights = devices.length;
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <ErrorBoundary>
+      <div className="flex flex-col gap-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Iluminação</h1>
           <p className="text-muted-foreground mt-1">
@@ -201,18 +234,29 @@ export default function IluminacaoPage() {
       </div>
 
       {/* Light cards grid */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {DEVICES.map((device) => (
-          <LightCard
-            key={device.deviceName}
-            deviceName={device.deviceName}
-            displayName={device.displayName}
-            location={device.location}
-            initialState={lightStates[device.deviceName]}
-            onStateChange={handleLightStateChange}
-          />
-        ))}
+      {isLoadingDevices ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : devices.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          Nenhum dispositivo encontrado.
+        </div>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {devices.map((device) => (
+            <LightCard
+              key={device.deviceName}
+              deviceName={device.deviceName}
+              displayName={device.displayName}
+              location={device.location}
+              initialState={lightStates[device.deviceName]}
+              onStateChange={handleLightStateChange}
+            />
+          ))}
+        </div>
+      )}
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }

@@ -1,0 +1,61 @@
+# Sistema de Automação Residencial
+
+Sistema completo de automação residencial com controle de dispositivos IoT via interface web.
+
+## 🚀 Início Rápido
+
+```bash
+npm start
+```
+
+Isso inicia todos os serviços:
+- **Docker** (Mosquitto MQTT)
+- **Node-RED**
+- **Spring Boot** (Backend API)
+- **Frontend** (Next.js)
+- **Tuya Bridge** (Bridge MQTT → Tuya)
+
+## 📋 Pré-requisitos
+
+- Node.js 18+
+- Java 21+
+- MySQL 8+
+- Docker Desktop (para MQTT broker)
+
+## ⚙️ Configuração
+
+### Variáveis de Ambiente
+
+O Spring Boot requer `JWT_SECRET` (mínimo 32 caracteres). Para desenvolvimento, já está configurado no `package.json`.
+
+Para produção, configure:
+```bash
+export JWT_SECRET="seu-secret-aqui-minimo-32-caracteres"
+```
+
+### Banco de Dados
+
+**Primeira vez ou reset completo:**
+1. Execute o script `init_database.sql` no MySQL Workbench
+2. Isso cria o banco do zero com todas as tabelas e dados iniciais
+
+**Migrações automáticas:**
+O Flyway gerencia migrações futuras automaticamente. As migrações estão em:
+- `sistema-esp8266/app/src/main/resources/db/migration/`
+
+## 📁 Estrutura
+
+```
+├── frontend/              # Interface Next.js
+├── sistema-esp8266/      # Backend Spring Boot
+├── tuya-mqtt-bridge.js   # Bridge MQTT → Tuya
+├── docker-compose.yml     # Configuração Docker
+└── package.json          # Scripts de inicialização
+```
+
+## 🔐 Credenciais Padrão
+
+- **Usuário:** admin
+- **Senha:** admin
+
+⚠️ **Altere em produção!**

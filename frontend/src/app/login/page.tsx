@@ -49,13 +49,8 @@ export default function LoginPage() {
 
             if (response.status === 200 && response.data.success) {
                 // JWT token is stored in httpOnly cookie by backend
-                // Store user info from response
-                const user = response.data.user || {
-                    id: "1",
-                    name: data.username,
-                    email: `${data.username}@automacao.com`,
-                };
-                document.cookie = `automation.user=${JSON.stringify(user)}; path=/; max-age=86400`;
+                // User data will be fetched from /api/me endpoint by AuthContext
+                // No need to store user data in client-side cookie
                 
                 toast.success("Login realizado com sucesso!");
                 router.push("/dashboard");
