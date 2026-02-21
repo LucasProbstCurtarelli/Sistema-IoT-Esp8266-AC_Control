@@ -11,38 +11,79 @@ export const api = axios.create({
   timeout: 10000, // 10 seconds timeout
 });
 
-// Request interceptor for debugging
+// Request interceptor - only log in development
 api.interceptors.request.use(
   (config) => {
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, {
-      baseURL: config.baseURL,
-      data: config.data,
-      headers: config.headers,
-    });
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, {
+        baseURL: config.baseURL,
+        // Don't log sensitive data
+        hasData: !!config.data,
+      });
+    }
     return config;
   },
   (error) => {
+    // Always log errors
     console.error('[API] Request error:', error);
     return Promise.reject(error);
   }
 );
 
-// Response interceptor for debugging
+// Response interceptor - only log in development
 api.interceptors.response.use(
   (response) => {
-    console.log(`[API] Response from ${response.config.url}:`, {
-      status: response.status,
-      data: response.data,
-    });
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[API] Response from ${response.config.url}:`, {
+        status: response.status,
+        hasData: !!response.data,
+      });
+    }
     return response;
   },
   (error) => {
-    console.error(`[API] Response error from ${error.config?.url}:`, {
+    // Always log errors, but sanitize sensitive data
+    const errorDetails: any = {
       message: error.message,
-      response: error.response?.data,
       status: error.response?.status,
       statusText: error.response?.statusText,
-    });
+      url: error.config?.url,
+      method: error.config?.method,
+      // Network errors don't have response
+      isNetworkError: !error.response,
+    };
+    
+    // Don't log full response data in production
+    if (process.env.NODE_ENV === 'development') {
+      errorDetails.response = error.response?.data;
+      errorDetails.config = {
+        baseURL: error.config?.baseURL,
+        url: error.config?.url,
+        withCredentials: error.config?.withCredentials,
+      };
+    }
+    
+    console.error(`[API] Response error from ${error.config?.url}:`, errorDetails);
+
+    // Redirect to login on 401/403 (unauthorized/forbidden)
+    // Only redirect if we're on the client side and not already on the login page
+    // Don't redirect for /api/me calls - those are expected to fail when not authenticated
+    if (typeof window !== 'undefined' && 
+        (error.response?.status === 401 || error.response?.status === 403)) {
+      const currentPath = window.location.pathname;
+      const requestUrl = error.config?.url || '';
+      
+      // Don't redirect if:
+      // 1. Already on login page
+      // 2. Request is to /api/me (expected to fail when not authenticated)
+      if (currentPath !== '/login' && 
+          !currentPath.startsWith('/login') &&
+          !requestUrl.includes('/api/me')) {
+        // Clear any stale auth data
+        window.location.href = '/login';
+      }
+    }
+
     return Promise.reject(error);
   }
 );
@@ -74,6 +115,70 @@ export interface LightStatusResponse {
   lastUpdated?: string;
 }
 
+export interface DeviceResponse {
+  id: string;
+  deviceName: string;
+  displayName: string;
+  location: string;
+  deviceType: string;
+  enabled: boolean;
+}
+
+export const deviceService = {
+  /**
+   * Gets all enabled devices.
+   * 
+   * @returns Promise with list of devices
+   */
+  getAllDevices: async (): Promise<DeviceResponse[]> => {
+    try {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[DeviceService] Fetching all devices');
+      }
+      
+      const response = await api.get('/api/devices');
+      return response.data;
+    } catch (error: unknown) {
+      const axiosError = error as { 
+        message?: string;
+        response?: { data?: unknown; status?: number };
+      };
+      console.error('[DeviceService] Error fetching devices:', {
+        error: axiosError?.message,
+        status: axiosError?.response?.status,
+      });
+      throw error;
+    }
+  },
+
+  /**
+   * Gets a device by device name.
+   * 
+   * @param deviceName The device name (e.g., "lampada_1")
+   * @returns Promise with device information
+   */
+  getDevice: async (deviceName: string): Promise<DeviceResponse> => {
+    try {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[DeviceService] Fetching device: ${deviceName}`);
+      }
+      
+      const response = await api.get(`/api/devices/${deviceName}`);
+      return response.data;
+    } catch (error: unknown) {
+      const axiosError = error as { 
+        message?: string;
+        response?: { data?: unknown; status?: number };
+      };
+      console.error(`[DeviceService] Error fetching device ${deviceName}:`, {
+        error: axiosError?.message,
+        status: axiosError?.response?.status,
+      });
+      throw error;
+    }
+  },
+};
+
 export const lightingService = {
   /**
    * Sends a light command with optional state, brightness, and color.
@@ -84,11 +189,15 @@ export const lightingService = {
    */
   sendCommand: async (deviceName: string, command: LightCommandRequest) => {
     try {
-      console.log(`[LightingService] Sending command to ${deviceName}:`, command);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[LightingService] Sending command to ${deviceName}:`, command);
+      }
       
       const response = await api.post(`/api/lights/${deviceName}`, command);
       
-      console.log(`[LightingService] Success response:`, response.data);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[LightingService] Success response:`, response.data);
+      }
       return response.data;
     } catch (error: unknown) {
       const axiosError = error as { 
@@ -96,12 +205,16 @@ export const lightingService = {
         response?: { data?: unknown; status?: number };
         config?: unknown;
       };
+      // Always log errors
       console.error(`[LightingService] Error in sendCommand:`, {
         deviceName,
-        command,
         error: axiosError?.message,
-        response: axiosError?.response?.data,
         status: axiosError?.response?.status,
+        // Only log full response in development
+        ...(process.env.NODE_ENV === 'development' && {
+          command,
+          response: axiosError?.response?.data,
+        }),
       });
       throw error;
     }
@@ -115,22 +228,30 @@ export const lightingService = {
    */
   getStatus: async (deviceName: string): Promise<LightStatusResponse> => {
     try {
-      console.log(`[LightingService] Getting status for ${deviceName}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[LightingService] Getting status for ${deviceName}`);
+      }
       
       const response = await api.get(`/api/lights/${deviceName}/status`);
       
-      console.log(`[LightingService] Status response:`, response.data);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[LightingService] Status response:`, response.data);
+      }
       return response.data;
     } catch (error: unknown) {
       const axiosError = error as { 
         message?: string;
         response?: { data?: unknown; status?: number };
       };
+      // Always log errors
       console.error(`[LightingService] Error getting status:`, {
         deviceName,
         error: axiosError?.message,
-        response: axiosError?.response?.data,
         status: axiosError?.response?.status,
+        // Only log full response in development
+        ...(process.env.NODE_ENV === 'development' && {
+          response: axiosError?.response?.data,
+        }),
       });
       throw error;
     }

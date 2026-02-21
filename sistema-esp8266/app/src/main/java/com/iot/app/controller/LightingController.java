@@ -3,6 +3,7 @@ package com.iot.app.controller;
 import com.iot.app.dto.LightCommandRequest;
 import com.iot.app.dto.LightStatusResponse;
 import com.iot.app.service.TuyaLightingService;
+import com.iot.app.validation.ValidDeviceName;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +50,7 @@ public class LightingController {
      */
     @PostMapping("/{deviceName}")
     public ResponseEntity<Map<String, Object>> setLightState(
-            @PathVariable String deviceName,
+            @PathVariable @ValidDeviceName String deviceName,
             @Valid @RequestBody LightCommandRequest request) {
         try {
             // Validate that at least one field is provided
@@ -122,7 +123,7 @@ public class LightingController {
      * @return HTTP response with the light status
      */
     @GetMapping("/{deviceName}/status")
-    public ResponseEntity<LightStatusResponse> getLightStatus(@PathVariable String deviceName) {
+    public ResponseEntity<LightStatusResponse> getLightStatus(@PathVariable @ValidDeviceName String deviceName) {
         logger.debug("Getting real-time status for device '{}'", deviceName);
         
         try {

@@ -7,6 +7,9 @@ services:
     ports:
       - "1883:1883"
       - "9001:9001"
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME:-mqtt_user}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
@@ -14,6 +17,17 @@ services:
     networks:
       - tuya-network
     restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$MQTT_PASSWORD" ]; then
+          echo 'WARNING: MQTT_PASSWORD not set. Using default password. Set MQTT_PASSWORD environment variable for production.'
+          MQTT_PASSWORD=default_mqtt_password_$$(openssl rand -hex 8)
+        fi
+        mosquitto_passwd -c -b /mosquitto/config/passwd "$$MQTT_USERNAME" "$$MQTT_PASSWORD"
+        chmod 644 /mosquitto/config/passwd
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
 
   tuya-mqtt:
     image: thecodemonkey/tuya-mqtt:latest
@@ -23,8 +37,8 @@ services:
     environment:
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
-      - MQTT_USERNAME=
-      - MQTT_PASSWORD=
+      - MQTT_USERNAME=${MQTT_USERNAME:-mqtt_user}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
     volumes:
       - ./tuya-mqtt/devices.conf:/app/devices.conf:ro
     networks:

@@ -1,0 +1,11 @@
+# MQTT ACL (Access Control List)
+# Format: topic [read|write|readwrite] <topic_pattern>
+# 
+# Allow authenticated users to read/write to tuya topics
+user ${MQTT_USERNAME}
+topic readwrite tuya/+/command
+topic readwrite tuya/+/query
+topic read tuya/+/state
+
+# Allow read/write to IoT sensor topics
+topic readwrite /iot/+/+

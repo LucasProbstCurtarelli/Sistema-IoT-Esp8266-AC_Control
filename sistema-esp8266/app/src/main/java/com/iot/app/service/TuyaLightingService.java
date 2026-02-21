@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -42,13 +43,21 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
 
     private static final Logger logger = LoggerFactory.getLogger(TuyaLightingService.class);
     
-    private static final String BROKER_URL = "tcp://localhost:1883";
     private static final String CLIENT_ID_PREFIX = "TuyaLightingService-";
     private static final int QOS = 1;
     private static final int CONNECTION_TIMEOUT = 30;
     private static final int KEEP_ALIVE_INTERVAL = 60;
     private static final long RECONNECT_DELAY_MS = 5000;
     private static final long STATE_QUERY_TIMEOUT_SECONDS = 5;
+    
+    @Value("${mqtt.broker.url:tcp://localhost:1883}")
+    private String brokerUrl;
+    
+    @Value("${mqtt.username:}")
+    private String mqttUsername;
+    
+    @Value("${mqtt.password:}")
+    private String mqttPassword;
     
     private final ObjectMapper objectMapper;
     private final ReentrantLock connectionLock = new ReentrantLock();
@@ -160,10 +169,6 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             dpsNode.put("22", tuyaBrightness);
             hasChanges = true;
             logger.debug("Converted brightness from {}% to Tuya value {}", brightnessPercent, tuyaBrightness);
-        }
-        
-        if (!hasChanges) {
-            throw new IllegalArgumentException("No valid fields to send");
         }
         
         if (!hasChanges) {
@@ -486,7 +491,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             }
             
             String clientId = CLIENT_ID_PREFIX + System.currentTimeMillis();
-            mqttClient = new MqttClient(BROKER_URL, clientId, new MemoryPersistence());
+            mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
             
             MqttConnectOptions options = new MqttConnectOptions();
             options.setCleanSession(true);
@@ -494,7 +499,27 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             options.setKeepAliveInterval(KEEP_ALIVE_INTERVAL);
             options.setAutomaticReconnect(false); // We handle reconnection manually
             
-            logger.info("Connecting to MQTT broker at {}...", BROKER_URL);
+            // Set MQTT authentication if credentials are provided
+            String username = mqttUsername;
+            String password = mqttPassword;
+            
+            // Check environment variables if not set in properties
+            if ((username == null || username.isEmpty()) && System.getenv("MQTT_USERNAME") != null) {
+                username = System.getenv("MQTT_USERNAME");
+            }
+            if ((password == null || password.isEmpty()) && System.getenv("MQTT_PASSWORD") != null) {
+                password = System.getenv("MQTT_PASSWORD");
+            }
+            
+            if (username != null && !username.isEmpty() && password != null && !password.isEmpty()) {
+                options.setUserName(username);
+                options.setPassword(password.toCharArray());
+                logger.debug("Using MQTT authentication with username: {}", username);
+            } else {
+                logger.warn("MQTT credentials not configured. Connection may fail if broker requires authentication.");
+            }
+            
+            logger.info("Connecting to MQTT broker at {}...", brokerUrl);
             mqttClient.connect(options);
             
             logger.info("Successfully connected to MQTT broker");
