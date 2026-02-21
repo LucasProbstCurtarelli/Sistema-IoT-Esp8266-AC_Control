@@ -43,27 +43,55 @@ api.interceptors.response.use(
   },
   (error) => {
     // Always log errors, but sanitize sensitive data
-    const errorDetails: any = {
-      message: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      url: error.config?.url,
-      method: error.config?.method,
-      // Network errors don't have response
-      isNetworkError: !error.response,
-    };
+    const requestUrl = error.config?.url || error.request?.url || 'unknown';
+    const method = (error.config?.method || error.request?.method || 'unknown').toUpperCase();
+    const isNetworkError = !error.response;
+    
+    // Build error details with guaranteed meaningful values
+    const errorDetails: Record<string, any> = {};
+    
+    // Always include these properties
+    errorDetails.url = String(requestUrl);
+    errorDetails.method = String(method);
+    errorDetails.isNetworkError = Boolean(isNetworkError);
+    
+    // Add message if available
+    if (error.message) {
+      errorDetails.message = String(error.message);
+    }
+    
+    // Add response status if available
+    if (error.response?.status !== undefined) {
+      errorDetails.status = Number(error.response.status);
+    }
+    
+    // Add status text if available
+    if (error.response?.statusText) {
+      errorDetails.statusText = String(error.response.statusText);
+    }
     
     // Don't log full response data in production
     if (process.env.NODE_ENV === 'development') {
-      errorDetails.response = error.response?.data;
-      errorDetails.config = {
-        baseURL: error.config?.baseURL,
-        url: error.config?.url,
-        withCredentials: error.config?.withCredentials,
-      };
+      if (error.response?.data !== undefined) {
+        errorDetails.responseData = error.response.data;
+      }
+      if (error.config) {
+        errorDetails.config = {
+          baseURL: error.config.baseURL,
+          url: error.config.url,
+          withCredentials: error.config.withCredentials,
+        };
+      }
     }
     
-    console.error(`[API] Response error from ${error.config?.url}:`, errorDetails);
+    // Log with explicit stringification to ensure visibility
+    const errorSummary = `[API] Response error from ${requestUrl} (${method})`;
+    if (Object.keys(errorDetails).length > 0) {
+      console.error(errorSummary, errorDetails);
+    } else {
+      // Fallback: log raw error if details couldn't be extracted
+      console.error(errorSummary, error);
+    }
 
     // Redirect to login on 401/403 (unauthorized/forbidden)
     // Only redirect if we're on the client side and not already on the login page

@@ -19,6 +19,11 @@ import java.util.function.Function;
 
 /**
  * JWT Token Provider for generating and validating JWT tokens.
+ * 
+ * Handles token creation, validation, and revocation checking.
+ * 
+ * @author Sistema de Automação Residencial
+ * @version 1.0
  */
 @Component
 public class JwtTokenProvider {
@@ -32,6 +37,12 @@ public class JwtTokenProvider {
 
     @Value("${jwt.expiration:86400000}") // 24 hours default
     private long jwtExpirationMs;
+    
+    private final TokenBlacklistService tokenBlacklistService;
+    
+    public JwtTokenProvider(TokenBlacklistService tokenBlacklistService) {
+        this.tokenBlacklistService = tokenBlacklistService;
+    }
 
     @PostConstruct
     public void validateSecret() {
@@ -128,8 +139,30 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    /**
+     * Validates a JWT token against user details and checks if it's revoked.
+     * 
+     * @param token The JWT token to validate
+     * @param userDetails The user details to validate against
+     * @return true if the token is valid and not revoked, false otherwise
+     */
     public Boolean validateToken(String token, UserDetails userDetails) {
+        // Check if token is revoked (blacklisted)
+        if (tokenBlacklistService.isTokenRevoked(token)) {
+            logger.debug("Token validation failed: token is revoked");
+            return false;
+        }
+        
         final String username = extractUsername(token);
         return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+    }
+    
+    /**
+     * Revokes a token by adding it to the blacklist.
+     * 
+     * @param token The JWT token to revoke
+     */
+    public void revokeToken(String token) {
+        tokenBlacklistService.revokeToken(token);
     }
 }

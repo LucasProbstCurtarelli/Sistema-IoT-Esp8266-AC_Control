@@ -84,31 +84,33 @@ public class LightingController {
             return ResponseEntity.badRequest().body(error);
             
         } catch (TuyaLightingService.TuyaLightingException e) {
+            // Log full error details server-side only
             logger.error("Error controlling light '{}': {}", deviceName, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             
-            // Provide more specific error messages based on the exception
-            String errorMessage = e.getMessage();
-            if (errorMessage != null) {
-                if (errorMessage.contains("connect") || errorMessage.contains("broker")) {
-                    errorMessage = "Erro de conexão MQTT. Verifique se o broker Mosquitto está rodando (docker compose up).";
-                } else if (errorMessage.contains("publish")) {
-                    errorMessage = "Erro ao enviar comando MQTT. Verifique a conexão com o broker.";
+            // Provide user-friendly error messages without exposing internal details
+            String errorMessage = "Unable to control device. Please try again later.";
+            String userMessage = e.getMessage();
+            if (userMessage != null) {
+                if (userMessage.contains("connect") || userMessage.contains("broker")) {
+                    errorMessage = "MQTT connection error. Please verify the Mosquitto broker is running.";
+                } else if (userMessage.contains("publish")) {
+                    errorMessage = "Failed to send MQTT command. Please check the broker connection.";
+                } else if (userMessage.contains("Device not found") || userMessage.contains("unknown")) {
+                    errorMessage = "Device not found or unavailable.";
                 }
-            } else {
-                errorMessage = "Erro ao controlar lâmpada";
             }
             
             error.put("success", false);
             error.put("message", errorMessage);
-            error.put("details", e.getMessage());
             return ResponseEntity.internalServerError().body(error);
             
         } catch (Exception e) {
+            // Log full error details server-side only
             logger.error("Unexpected error controlling light '{}': {}", deviceName, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", "Erro inesperado ao controlar lâmpada: " + e.getMessage());
+            error.put("message", "An unexpected error occurred while controlling the device.");
             return ResponseEntity.internalServerError().body(error);
         }
     }
@@ -131,20 +133,20 @@ public class LightingController {
             return ResponseEntity.ok(status);
             
         } catch (TuyaLightingService.TuyaLightingException e) {
+            // Log full error details server-side only
             logger.error("Error getting status for device '{}': {}", deviceName, e.getMessage(), e);
             
-            // Provide more specific error messages
-            String errorMessage = e.getMessage();
-            if (errorMessage != null) {
-                if (errorMessage.contains("Timeout")) {
-                    errorMessage = "Timeout ao consultar estado do dispositivo. Verifique se o bridge está rodando.";
-                } else if (errorMessage.contains("connect") || errorMessage.contains("broker")) {
-                    errorMessage = "Erro de conexão MQTT. Verifique se o broker Mosquitto está rodando.";
-                } else if (errorMessage.contains("Device error")) {
-                    errorMessage = "Erro ao consultar dispositivo: " + errorMessage;
+            // Provide user-friendly error messages without exposing internal details
+            String errorMessage = "Unable to retrieve device status. Please try again later.";
+            String userMessage = e.getMessage();
+            if (userMessage != null) {
+                if (userMessage.contains("Timeout")) {
+                    errorMessage = "Request timeout. Please verify the bridge is running.";
+                } else if (userMessage.contains("connect") || userMessage.contains("broker")) {
+                    errorMessage = "MQTT connection error. Please verify the Mosquitto broker is running.";
+                } else if (userMessage.contains("Device not found") || userMessage.contains("unknown")) {
+                    errorMessage = "Device not found or unavailable.";
                 }
-            } else {
-                errorMessage = "Erro ao obter status do dispositivo";
             }
             
             LightStatusResponse errorResponse = LightStatusResponse.builder()
@@ -156,12 +158,13 @@ public class LightingController {
             return ResponseEntity.internalServerError().body(errorResponse);
             
         } catch (Exception e) {
+            // Log full error details server-side only
             logger.error("Unexpected error getting status for device '{}': {}", deviceName, e.getMessage(), e);
             
             LightStatusResponse errorResponse = LightStatusResponse.builder()
                     .success(false)
                     .device(deviceName)
-                    .message("Erro inesperado ao obter status: " + e.getMessage())
+                    .message("An unexpected error occurred while retrieving device status.")
                     .build();
             
             return ResponseEntity.internalServerError().body(errorResponse);

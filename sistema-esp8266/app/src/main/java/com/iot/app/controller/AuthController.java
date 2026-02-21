@@ -5,6 +5,8 @@ import com.iot.app.dto.LoginResponse;
 import com.iot.app.model.User;
 import com.iot.app.repository.UserRepository;
 import com.iot.app.security.JwtTokenProvider;
+
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -20,6 +22,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * REST controller for authentication.
@@ -63,24 +67,13 @@ public class AuthController {
             @Valid @RequestBody LoginRequest loginRequest,
             HttpServletResponse response) {
         
+        String username = loginRequest.getUsername();
+        String password = loginRequest.getPassword();
+        
         try {
-            String username = loginRequest.getUsername();
-            String password = loginRequest.getPassword();
 
-            // Debug: verificar se o usuário existe no banco
-            logger.info("Attempting login for username: {}", username);
-            userRepository.findByUsername(username).ifPresentOrElse(
-                user -> {
-                    logger.info("User found in database: username={}, role={}, passwordHash length={}, passwordHash prefix={}", 
-                        user.getUsername(), user.getRole(), 
-                        user.getPassword() != null ? user.getPassword().length() : 0,
-                        user.getPassword() != null && user.getPassword().length() > 7 ? user.getPassword().substring(0, 7) : "null");
-                },
-                () -> {
-                    logger.error("User '{}' NOT FOUND in database. Available users: {}", username, 
-                        userRepository.findAll().stream().map(u -> u.getUsername()).toList());
-                }
-            );
+            // Log login attempt at debug level only (no sensitive information)
+            logger.debug("Login attempt for username: {}", username);
 
             // Authenticate user - throws exception if credentials are invalid
             authenticationManager.authenticate(
@@ -126,7 +119,8 @@ public class AuthController {
             return ResponseEntity.ok(loginResponse);
 
         } catch (Exception e) {
-            logger.error("Login failed: {}", e.getMessage());
+            // Log authentication failure at warn level (generic message, no sensitive details)
+            logger.warn("Authentication failed for username: {}", username);
             LoginResponse errorResponse = new LoginResponse(false, "Credenciais inválidas");
             return ResponseEntity.status(401).body(errorResponse);
         }
@@ -139,6 +133,7 @@ public class AuthController {
      */
     @GetMapping("/me")
     public ResponseEntity<LoginResponse.UserInfo> getCurrentUser() {
+        // User is already authenticated via JWT filter
         try {
             // Get authenticated user from security context
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -162,6 +157,64 @@ public class AuthController {
             logger.error("Error getting current user: {}", e.getMessage());
             return ResponseEntity.status(500).build();
         }
+    }
+    
+    /**
+     * Endpoint to logout (revoke current token).
+     * 
+     * @param request HTTP request to extract token
+     * @return HTTP response indicating logout success
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(HttpServletRequest request) {
+        try {
+            // Extract token from request
+            String token = extractTokenFromRequest(request);
+            
+            if (token != null) {
+                // Revoke the token
+                jwtTokenProvider.revokeToken(token);
+                logger.info("Token revoked for user logout");
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Logout successful");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            logger.error("Error during logout: {}", e.getMessage());
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Logout failed");
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+    
+    /**
+     * Extracts JWT token from HTTP request (cookie or Authorization header).
+     * 
+     * @param request The HTTP request
+     * @return The JWT token, or null if not found
+     */
+    private String extractTokenFromRequest(HttpServletRequest request) {
+        // Try Authorization header first
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        
+        // Try cookie
+        jakarta.servlet.http.Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (jakarta.servlet.http.Cookie cookie : cookies) {
+                if ("authToken".equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
+        }
+        
+        return null;
     }
     
 }

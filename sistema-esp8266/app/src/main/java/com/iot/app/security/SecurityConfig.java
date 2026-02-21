@@ -25,27 +25,56 @@ import com.iot.app.filter.RateLimitFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.regex.Pattern;
 
+/**
+ * Spring Security configuration for the application.
+ * 
+ * Configures authentication, authorization, password encoding, and security filters.
+ * Handles JWT-based stateless authentication with httpOnly cookies.
+ * 
+ * @author Sistema de Automação Residencial
+ * @version 1.0
+ */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
-    // 1. A PONTE QUE FALTAVA: Ensina o Spring a buscar o usuário no banco
+    /**
+     * Configures UserDetailsService to load users from the database.
+     * 
+     * This bean bridges the application's User entity with Spring Security's UserDetails interface.
+     * It retrieves users from the database and converts them to Spring Security's UserDetails format.
+     * 
+     * @param repo The user repository for database access
+     * @return UserDetailsService implementation that loads users from database
+     */
     @Bean
     public UserDetailsService userDetailsService(UserRepository repo) {
         return username -> {
             User user = repo.findByUsername(username)
-                    .orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado: " + username));
+                    .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
-            // Converte o seu User (do banco) para o UserDetails (do Spring)
+            // Convert application User entity to Spring Security UserDetails
             return org.springframework.security.core.userdetails.User
                     .withUsername(user.getUsername())
                     .password(user.getPassword())
-                    .authorities(user.getRole()) // ou roles(user.getRole()) dependendo de como salvou ("ROLE_ADMIN" vs
-                                                 // "ADMIN")
+                    .authorities(user.getRole()) // Role format: "ROLE_ADMIN" or "ADMIN"
                     .build();
         };
     }
 
+    /**
+     * Configures the security filter chain for HTTP requests.
+     * 
+     * Sets up CORS, CSRF protection, session management, authorization rules,
+     * and custom filters (rate limiting and JWT authentication).
+     * 
+     * @param http HttpSecurity builder
+     * @param corsConfigurationSource CORS configuration source
+     * @param jwtAuthenticationFilter JWT authentication filter
+     * @param rateLimitFilter Rate limiting filter
+     * @return Configured SecurityFilterChain
+     * @throws Exception if configuration fails
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http, 
@@ -65,8 +94,7 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
                         .requestMatchers("/api/login").permitAll()
-                        // Temporary debug endpoint (remove in production)
-                        .requestMatchers("/api/debug/**").permitAll()
+                        .requestMatchers("/api/health/**").permitAll() // Health check endpoints
                         // Admin endpoints require ADMIN role
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         // All other API endpoints require authentication
@@ -81,15 +109,29 @@ public class SecurityConfig {
                         // Return 403 (Forbidden) when authenticated but lacks required authority
                         .accessDeniedHandler(accessDeniedHandler()))
                 .formLogin(form -> form.disable()) // Disable form login since we use JWT
-                .logout(logout -> logout.disable()); // Disable default logout, implement custom if needed
+                .logout(logout -> logout.disable()); // Disable default logout, custom logout endpoint is implemented
         return http.build();
     }
 
+    /**
+     * Configures password encoder using BCrypt.
+     * 
+     * BCrypt is a strong, adaptive hashing function that automatically handles salt generation.
+     * 
+     * @return BCryptPasswordEncoder instance
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Configures the authentication manager.
+     * 
+     * @param authConfig Authentication configuration
+     * @return AuthenticationManager instance
+     * @throws Exception if configuration fails
+     */
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
         return authConfig.getAuthenticationManager();
@@ -152,18 +194,18 @@ public class SecurityConfig {
             boolean isDevelopment = "dev".equalsIgnoreCase(profile) || "development".equalsIgnoreCase(profile);
             
             if (isDevelopment) {
-                // In development, always ensure admin password is "admin"
+                // In development, ensure admin password is "admin123" (8 chars, meets 7-25 requirement)
                 repo.findByUsername("admin").ifPresentOrElse(
                     admin -> {
-                        String correctPassword = "admin";
-                        // Test if current hash matches "admin"
+                        String correctPassword = "admin123"; // 8 characters - meets validation requirement
+                        // Verify if current hash matches "admin123"
                         if (!encoder.matches(correctPassword, admin.getPassword())) {
-                            logger.warn("Admin password hash doesn't match 'admin'. Updating...");
+                            logger.warn("Admin password hash doesn't match 'admin123'. Updating...");
                             String newHash = encoder.encode(correctPassword);
                             // Use update query to avoid optimistic locking issues
                             int updated = repo.updatePasswordByUsername("admin", newHash);
                             if (updated > 0) {
-                                logger.info("Admin password updated to 'admin'");
+                                logger.info("Admin password updated to 'admin123'");
                             } else {
                                 logger.warn("Failed to update admin password");
                             }
@@ -197,14 +239,14 @@ public class SecurityConfig {
                 
                 if (adminPassword == null || adminPassword.isEmpty()) {
                     if (isDevelopment) {
-                        adminPassword = "admin"; // Simple default for development (matches init_database.sql)
-                        logger.warn("Using default admin password 'admin' in development mode. " +
+                        adminPassword = "admin123"; // 8 characters - meets validation requirement (7-25)
+                        logger.warn("Using default admin password 'admin123' in development mode. " +
                                    "Set ADMIN_PASSWORD environment variable for production.");
                     } else {
                         logger.error("ADMIN_PASSWORD environment variable is required in production!");
                         throw new IllegalStateException(
                             "ADMIN_PASSWORD environment variable must be set in production. " +
-                            "Password must be at least 8 characters with uppercase, lowercase, digit, and special character."
+                            "Password must be between 7 and 25 characters."
                         );
                     }
                 }

@@ -1,11 +1,15 @@
 -- ============================================
--- Script de Inicialização Completa do Banco de Dados
+-- Complete Database Initialization Script
 -- ============================================
--- Este script recria o banco de dados do zero
--- Execute no MySQL Workbench para resetar completamente o banco
+-- This script recreates the database from scratch
+-- Execute in MySQL Workbench to completely reset the database
+-- 
+-- Validation Rules:
+--   - Username: 5-25 characters
+--   - Password: 7-25 characters (stored as BCrypt hash)
 -- ============================================
 
--- Drop e recria o banco de dados
+-- Drop and recreate the database
 DROP DATABASE IF EXISTS `sistema-esp8266`;
 CREATE DATABASE `sistema-esp8266` 
     DEFAULT CHARACTER SET utf8mb4 
@@ -14,12 +18,14 @@ CREATE DATABASE `sistema-esp8266`
 USE `sistema-esp8266`;
 
 -- ============================================
--- Tabela de Usuários (com UUID como PK)
+-- User Table (with UUID as PK)
 -- ============================================
+-- Username: 5-25 characters (enforced by application validation)
+-- Password: 7-25 characters (stored as BCrypt hash, 60 characters)
 CREATE TABLE `user` (
     `uuid` CHAR(36) NOT NULL,
-    `username` VARCHAR(255) NOT NULL UNIQUE,
-    `password` VARCHAR(255) NOT NULL,
+    `username` VARCHAR(25) NOT NULL UNIQUE COMMENT '5-25 characters (enforced by application)',
+    `password` VARCHAR(60) NOT NULL COMMENT 'BCrypt hash (60 chars), original password 7-25 chars (enforced by application)',
     `role` VARCHAR(50) NOT NULL,
     PRIMARY KEY (`uuid`),
     UNIQUE KEY `uk_user_username` (`username`)
@@ -59,21 +65,26 @@ CREATE TABLE `flyway_schema_history` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- Inserir Usuário Admin
+-- Insert Admin User
 -- ============================================
--- Username: admin
--- Password: admin
--- BCrypt hash para "admin" (gerado com BCryptPasswordEncoder, rounds=10)
--- Este hash foi verificado e está correto
+-- Username: admin (5 characters - valid, meets 5-25 requirement)
+-- Password: admin123 (8 characters - valid, meets 7-25 requirement)
+-- 
+-- NOTE: The application's SecurityConfig CommandLineRunner will automatically
+-- set the correct BCrypt hash for "admin123" in development mode.
+-- This insert creates the user record; the password hash will be updated on first startup.
+-- 
+-- For production, use environment variables:
+--   ADMIN_USERNAME (5-25 characters)
+--   ADMIN_PASSWORD (7-25 characters)
 INSERT INTO `user` (`uuid`, `username`, `password`, `role`)
 VALUES (
     UUID(),
     'admin',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', -- Temporary hash, will be updated by application
     'ROLE_ADMIN'
 )
 ON DUPLICATE KEY UPDATE
-    `password` = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
     `role` = 'ROLE_ADMIN';
 
 -- ============================================
@@ -97,24 +108,25 @@ INSERT INTO `flyway_schema_history` (
     (4, '4', 'insert admin user', 'SQL', 'V4__insert_admin_user.sql', NULL, USER(), NOW(), 0, 1);
 
 -- ============================================
--- Verificação
+-- Verification
 -- ============================================
-SELECT 'Banco de dados inicializado com sucesso!' as status;
+SELECT 'Database initialized successfully!' as status;
 
 SELECT 
     `uuid` as id,
     `username`,
+    CHAR_LENGTH(`username`) as username_length,
     `role`,
-    'Admin user' as description
+    'Admin user (password will be set to "admin123" by application on startup)' as description
 FROM `user` 
 WHERE `username` = 'admin';
 
 SELECT 
     COUNT(*) as device_count,
-    'Dispositivos criados' as description
+    'Default devices created' as description
 FROM `device`;
 
 SELECT 
     COUNT(*) as migration_count,
-    'Migrações registradas' as description
+    'Flyway migrations registered' as description
 FROM `flyway_schema_history`;
