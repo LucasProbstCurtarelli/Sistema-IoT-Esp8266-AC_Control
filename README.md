@@ -53,9 +53,11 @@ O Flyway gerencia migrações futuras automaticamente. As migrações estão em:
 └── package.json          # Scripts de inicialização
 ```
 
-## 🔐 Credenciais Padrão
+## 🔐 Credenciais Padrão (Desenvolvimento)
 
-- **Usuário:** admin
-- **Senha:** admin
+- **Usuário:** admin (5 caracteres - válido)
+- **Senha:** admin123 (8 caracteres - válido)
 
-⚠️ **Altere em produção!**
+⚠️ **Altere em produção usando variáveis de ambiente:**
+- `ADMIN_USERNAME` (5-25 caracteres)
+- `ADMIN_PASSWORD` (7-25 caracteres)

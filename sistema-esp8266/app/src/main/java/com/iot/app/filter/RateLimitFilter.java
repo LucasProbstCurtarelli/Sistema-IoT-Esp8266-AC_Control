@@ -1,19 +1,21 @@
 package com.iot.app.filter;
 
+import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
+import io.github.bucket4j.Refill;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -29,18 +31,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(RateLimitFilter.class);
     
-    private final Bucket loginRateLimiter;
-    private final Bucket apiRateLimiter;
-    
-    // Store buckets per IP address
+    // Store buckets per IP address (each IP gets its own bucket instance)
     private final ConcurrentMap<String, Bucket> loginBuckets = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, Bucket> apiBuckets = new ConcurrentHashMap();
+    private final ConcurrentMap<String, Bucket> apiBuckets = new ConcurrentHashMap<>();
 
-    public RateLimitFilter(
-            @Qualifier("loginRateLimiter") Bucket loginRateLimiter,
-            @Qualifier("apiRateLimiter") Bucket apiRateLimiter) {
-        this.loginRateLimiter = loginRateLimiter;
-        this.apiRateLimiter = apiRateLimiter;
+    public RateLimitFilter() {
+        // No dependencies needed - buckets are created per-IP
     }
 
     @Override
@@ -56,11 +52,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean isLoginEndpoint = path != null && path.contains("/api/login");
         
         if (isLoginEndpoint) {
-            // Use per-IP bucket for login endpoint
-            bucket = loginBuckets.computeIfAbsent(clientIp, k -> loginRateLimiter);
+            // Create per-IP bucket for login endpoint (5 requests per 15 minutes)
+            bucket = loginBuckets.computeIfAbsent(clientIp, k -> Bucket.builder()
+                    .addLimit(Bandwidth.classic(5, Refill.intervally(5, Duration.ofMinutes(15))))
+                    .build());
         } else if (path != null && path.startsWith("/api/")) {
-            // Use per-IP bucket for API endpoints
-            bucket = apiBuckets.computeIfAbsent(clientIp, k -> apiRateLimiter);
+            // Create per-IP bucket for API endpoints (100 requests per minute)
+            bucket = apiBuckets.computeIfAbsent(clientIp, k -> Bucket.builder()
+                    .addLimit(Bandwidth.classic(100, Refill.intervally(100, Duration.ofMinutes(1))))
+                    .build());
         } else {
             // No rate limiting for other endpoints
             filterChain.doFilter(request, response);

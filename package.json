@@ -7,7 +7,7 @@
         "start": "concurrently \"npm:docker\" \"npm:nodered\" \"npm:springboot\" \"npm:frontend\" \"npm:tuya-bridge\"",
         "docker": "docker compose up",
         "nodered": "cd node-red && npm start",
-        "springboot": "cd sistema-esp8266/app && set JWT_SECRET=dev-secret-key-minimum-32-characters-long-for-testing-only-do-not-use-in-production && mvnw.cmd spring-boot:run",
+        "springboot": "cd sistema-esp8266/app && mvnw.cmd spring-boot:run",
         "frontend": "cd frontend && npm run dev",
         "tuya-bridge": "node tuya-mqtt-bridge.js",
         "stop": "docker compose down"

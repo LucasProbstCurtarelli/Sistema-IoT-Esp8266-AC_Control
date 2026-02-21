@@ -28,6 +28,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider jwtTokenProvider;
     private final UserDetailsService userDetailsService;
 
+    /**
+     * Constructor for JWT authentication filter.
+     * 
+     * @param jwtTokenProvider The JWT token provider for token operations
+     * @param userDetailsService The user details service for loading user information
+     */
     public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, UserDetailsService userDetailsService) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.userDetailsService = userDetailsService;
@@ -44,11 +50,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String username = jwtTokenProvider.extractUsername(token);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
+                // Validate token (includes revocation check)
                 if (jwtTokenProvider.validateToken(token, userDetails)) {
                     UsernamePasswordAuthenticationToken authentication = 
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(authentication);
+                } else {
+                    // Token is invalid or revoked, clear the cookie
+                    logger.debug("Token validation failed for user: {}", username);
+                    clearAuthCookie(response);
                 }
             } catch (io.jsonwebtoken.security.SignatureException | io.jsonwebtoken.ExpiredJwtException | 
                      io.jsonwebtoken.MalformedJwtException | io.jsonwebtoken.UnsupportedJwtException e) {
