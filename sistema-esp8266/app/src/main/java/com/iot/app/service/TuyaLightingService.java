@@ -131,6 +131,17 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         boolean hasColor = request.getColor() != null;
         boolean hasChanges = false;
         
+        // Detect if the color is white/grayscale
+        boolean isWhiteColor = false;
+        if (hasColor) {
+            String hex = request.getColor().substring(1);
+            int r = Integer.parseInt(hex.substring(0, 2), 16);
+            int g = Integer.parseInt(hex.substring(2, 4), 16);
+            int b = Integer.parseInt(hex.substring(4, 6), 16);
+            int maxDiff = Math.max(Math.max(Math.abs(r - g), Math.abs(g - b)), Math.abs(r - b));
+            isWhiteColor = maxDiff <= 30;
+        }
+        
         // IMPORTANT: Order matters for some Tuya devices
         // Always set mode (DPS 21) FIRST when color is involved, then color (DPS 24), then brightness (DPS 22)
         
@@ -141,17 +152,19 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             logger.debug("Adding power state: {}", request.getState());
         }
         
-        // DPS 21: Mode - Set to "colour" when color OR brightness is provided
-        // This ensures the lamp stays in colour mode and doesn't revert to white
+        // DPS 21: Mode - Use "white" mode for white colors, "colour" mode for colored lights
+        // White mode typically produces better white color without blue tint
         boolean hasBrightness = request.getBrightness() != null;
         if (hasColor || hasBrightness) {
-            dpsNode.put("21", "colour");
+            String mode = isWhiteColor ? "white" : "colour";
+            dpsNode.put("21", mode);
             hasChanges = true;
-            logger.debug("Setting mode to 'colour' to maintain color mode");
+            logger.debug("Setting mode to '{}' (isWhiteColor: {})", mode, isWhiteColor);
         }
         
         // DPS 24: Color in hexadecimal format (HHHHSSSSVVVV)
-        // Set AFTER mode to ensure colour mode is active
+        // Set AFTER mode to ensure the correct mode is active
+        // Note: Some devices may ignore color DPS when in white mode, but we send it anyway for compatibility
         if (hasColor) {
             String tuyaColorHex = hexToTuyaColorHex(request.getColor());
             dpsNode.put("24", tuyaColorHex);
@@ -383,6 +396,33 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         int g = Integer.parseInt(hex.substring(2, 4), 16);
         int b = Integer.parseInt(hex.substring(4, 6), 16);
         
+        // Check if this is a white/grayscale color (RGB values are close to each other)
+        // Use a more generous threshold to catch near-white colors
+        int maxDiff = Math.max(Math.max(Math.abs(r - g), Math.abs(g - b)), Math.abs(r - b));
+        boolean isWhiteOrGrayscale = maxDiff <= 30;
+        
+        // For white/grayscale colors, adjust RGB to add warmth and reduce blue tint
+        // This compensates for the device's tendency to show blue-ish white
+        if (isWhiteOrGrayscale) {
+            // Store original values for logging
+            int origR = r;
+            int origG = g;
+            int origB = b;
+            
+            // Calculate average brightness to maintain overall brightness
+            int avg = (r + g + b) / 3;
+            
+            // Add warmth: increase red, keep green, reduce blue
+            // This creates a warmer white that compensates for blue tint
+            // More aggressive adjustment to counteract strong blue tint
+            r = Math.min(255, avg + 25);  // Add more warmth (red)
+            g = Math.min(255, avg + 5);    // Slight green boost
+            b = Math.max(0, avg - 30);     // Reduce blue tint more aggressively
+            
+            logger.debug("Adjusted white color RGB: original r={}, g={}, b={} -> adjusted r={}, g={}, b={}", 
+                    origR, origG, origB, r, g, b);
+        }
+        
         // Convert RGB to HSV
         double[] hsv = rgbToHsv(r, g, b);
         
@@ -390,6 +430,16 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         int hue = (int) Math.round(hsv[0]);           // 0-360
         int saturation = (int) Math.round(hsv[1]);    // 0-1000
         int value = (int) Math.round(hsv[2]);         // 0-1000
+        
+        // For white/grayscale colors, ensure saturation is very low
+        // The RGB adjustment above should naturally produce a warm hue (around 0-60 degrees)
+        // which counteracts the blue tint, so we keep the calculated values
+        if (isWhiteOrGrayscale) {
+            // Ensure saturation is minimal (should be low from RGB adjustment, but cap it)
+            saturation = Math.min(saturation, 50);  // Cap at 50 to ensure near-white
+            // Hue from adjusted RGB should naturally be warm (0-60), which is good
+            // No need to override - let the adjusted RGB values determine the hue
+        }
         
         // Ensure values are in valid range
         hue = Math.max(0, Math.min(360, hue));
@@ -399,8 +449,8 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         // Format as hexadecimal (4 digits each)
         String tuyaHex = String.format("%04x%04x%04x", hue, saturation, value);
         
-        logger.debug("Converted hex color {} (RGB: r={}, g={}, b={}) to Tuya HSV: H={}, S={}, V={} -> {}", 
-                hexColor, r, g, b, hue, saturation, value, tuyaHex);
+        logger.debug("Converted hex color {} (RGB: r={}, g={}, b={}) to Tuya HSV: H={}, S={}, V={} -> {} (white/grayscale: {})", 
+                hexColor, r, g, b, hue, saturation, value, tuyaHex, isWhiteOrGrayscale);
         
         return tuyaHex;
     }
