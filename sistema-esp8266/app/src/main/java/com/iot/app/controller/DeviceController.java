@@ -3,6 +3,7 @@ package com.iot.app.controller;
 import com.iot.app.dto.DeviceResponse;
 import com.iot.app.model.Device;
 import com.iot.app.repository.DeviceRepository;
+import com.iot.app.validation.ValidDeviceName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -55,7 +56,7 @@ public class DeviceController {
      * @return Device information
      */
     @GetMapping("/{deviceName}")
-    public ResponseEntity<DeviceResponse> getDevice(@PathVariable String deviceName) {
+    public ResponseEntity<DeviceResponse> getDevice(@PathVariable @ValidDeviceName String deviceName) {
         logger.debug("Fetching device: {}", deviceName);
         
         return deviceRepository.findByDeviceName(deviceName)

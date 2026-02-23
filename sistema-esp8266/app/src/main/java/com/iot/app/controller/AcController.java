@@ -1,9 +1,12 @@
 package com.iot.app.controller;
 
 import com.iot.app.config.AcConfig;
+import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.AcPayload;
 import com.iot.app.service.IMqttService;
+import com.iot.app.util.ErrorResponseBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -50,19 +53,22 @@ public class AcController {
      * @return HTTP response indicating success or error
      */
     @PostMapping
-    public ResponseEntity<String> sendCommand(@RequestBody AcPayload payload) {
+    public ResponseEntity<?> sendCommand(@Valid @RequestBody AcPayload payload) {
         try {
             String jsonString = objectMapper.writeValueAsString(payload);
             logger.info("Sending AC command: {}", jsonString);
             
             mqttService.publish(AcConfig.TOPIC_CMD, jsonString);
 
-            return ResponseEntity.ok("Command sent successfully to air conditioner!");
+            return ResponseEntity.ok(ApplicationConstants.AC_COMMAND_SUCCESS);
             
         } catch (Exception e) {
             logger.error("Error sending AC command: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError()
-                .body("Error sending command: " + e.getMessage());
+            String userMessage = ErrorResponseBuilder.mapToUserFriendlyMessage(
+                e.getMessage(), 
+                ApplicationConstants.DEVICE_CONTROL_ERROR
+            );
+            return ErrorResponseBuilder.buildErrorResponseEntity(false, userMessage, 500);
         }
     }
 }

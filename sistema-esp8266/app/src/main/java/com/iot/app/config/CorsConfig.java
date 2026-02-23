@@ -1,5 +1,6 @@
 package com.iot.app.config;
 
+import com.iot.app.constants.ApplicationConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -69,8 +70,8 @@ public class CorsConfig {
         // Allow credentials (cookies, auth headers)
         configuration.setAllowCredentials(true);
         
-        // Cache preflight requests for 1 hour
-        configuration.setMaxAge(3600L);
+        // Cache preflight requests
+        configuration.setMaxAge((long) ApplicationConstants.CORS_MAX_AGE_SECONDS);
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

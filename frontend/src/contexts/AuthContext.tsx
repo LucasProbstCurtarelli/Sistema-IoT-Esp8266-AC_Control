@@ -64,10 +64,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signOut = React.useCallback(async () => {
         try {
+            // Call backend logout endpoint to revoke token
+            try {
+                await api.post("/api/logout");
+            } catch (error) {
+                // Log error but continue with logout
+                console.error("Error calling logout endpoint:", error);
+            }
             setUser(null);
-            // Note: authToken cookie is httpOnly, so it cannot be cleared from JavaScript
-            // Backend should handle token invalidation if needed
-            // For now, just redirect to login - the backend will reject invalid tokens
             router.push("/login");
             toast.success("Logout realizado com sucesso");
         } catch (error) {

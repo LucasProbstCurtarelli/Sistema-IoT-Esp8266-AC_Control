@@ -1,5 +1,6 @@
 package com.iot.app.filter;
 
+import com.iot.app.constants.ApplicationConstants;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
@@ -52,14 +53,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean isLoginEndpoint = path != null && path.contains("/api/login");
         
         if (isLoginEndpoint) {
-            // Create per-IP bucket for login endpoint (5 requests per 15 minutes)
+            // Create per-IP bucket for login endpoint
             bucket = loginBuckets.computeIfAbsent(clientIp, k -> Bucket.builder()
-                    .addLimit(Bandwidth.classic(5, Refill.intervally(5, Duration.ofMinutes(15))))
+                    .addLimit(Bandwidth.classic(
+                        ApplicationConstants.LOGIN_RATE_LIMIT_REQUESTS, 
+                        Refill.intervally(
+                            ApplicationConstants.LOGIN_RATE_LIMIT_REQUESTS, 
+                            Duration.ofMinutes(ApplicationConstants.LOGIN_RATE_LIMIT_WINDOW_MINUTES)
+                        )
+                    ))
                     .build());
         } else if (path != null && path.startsWith("/api/")) {
-            // Create per-IP bucket for API endpoints (100 requests per minute)
+            // Create per-IP bucket for API endpoints
             bucket = apiBuckets.computeIfAbsent(clientIp, k -> Bucket.builder()
-                    .addLimit(Bandwidth.classic(100, Refill.intervally(100, Duration.ofMinutes(1))))
+                    .addLimit(Bandwidth.classic(
+                        ApplicationConstants.API_RATE_LIMIT_REQUESTS, 
+                        Refill.intervally(
+                            ApplicationConstants.API_RATE_LIMIT_REQUESTS, 
+                            Duration.ofMinutes(ApplicationConstants.API_RATE_LIMIT_WINDOW_MINUTES)
+                        )
+                    ))
                     .build());
         } else {
             // No rate limiting for other endpoints
@@ -76,7 +89,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             response.setContentType("application/json");
             response.getWriter().write(
-                "{\"error\":\"Rate limit exceeded. Please try again later.\"}"
+                String.format("{\"error\":\"%s\"}", ApplicationConstants.RATE_LIMIT_EXCEEDED)
             );
         }
     }

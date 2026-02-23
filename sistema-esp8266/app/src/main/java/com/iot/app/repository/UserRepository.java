@@ -14,7 +14,7 @@ import java.util.UUID;
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID> {
     
-    // Este método é mágico: o Spring cria o SQL automaticamente
+    // This method is magic: Spring automatically creates the SQL
     // SELECT * FROM user WHERE username = ?
     Optional<User> findByUsername(String username);
     

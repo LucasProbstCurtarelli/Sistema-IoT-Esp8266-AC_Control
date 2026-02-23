@@ -33,9 +33,9 @@ export function LogoBrand({
     }, [isVisible, animationType]);
 
     return (
-        <div className={`${animationClass} flex items-center justify-center ${className || ""}`}>
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <span className="text-lg font-bold text-primary">AR</span>
+        <div className={`${animationClass} flex items-center justify-center shrink-0 ${className || ""}`}>
+            <div className="size-full rounded-lg bg-primary/10 flex items-center justify-center aspect-square">
+                <span className="text-xs font-bold text-primary leading-none whitespace-nowrap">AR</span>
             </div>
         </div>
     );

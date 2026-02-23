@@ -1,8 +1,11 @@
 package com.iot.app.controller;
 
+import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.LightCommandRequest;
 import com.iot.app.dto.LightStatusResponse;
 import com.iot.app.service.TuyaLightingService;
+import com.iot.app.util.ErrorResponseBuilder;
+import com.iot.app.util.SuccessResponseBuilder;
 import com.iot.app.validation.ValidDeviceName;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -55,10 +58,11 @@ public class LightingController {
         try {
             // Validate that at least one field is provided
             if (request.getState() == null && request.getBrightness() == null && request.getColor() == null) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("message", "Pelo menos um parâmetro deve ser fornecido (state, brightness ou color)");
-                return ResponseEntity.badRequest().body(error);
+                return ErrorResponseBuilder.buildErrorResponseEntity(
+                    false, 
+                    ApplicationConstants.NO_PARAMETERS_PROVIDED, 
+                    400
+                );
             }
 
             logger.info("Sending light command for device '{}': state={}, brightness={}, color={}", 
@@ -66,52 +70,40 @@ public class LightingController {
             
             lightingService.sendLightCommand(deviceName, request);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Comando enviado com sucesso");
-            response.put("device", deviceName);
-            response.put("state", request.getState());
-            response.put("brightness", request.getBrightness());
-            response.put("color", request.getColor());
+            Map<String, Object> additionalFields = new HashMap<>();
+            additionalFields.put("device", deviceName);
+            additionalFields.put("state", request.getState());
+            additionalFields.put("brightness", request.getBrightness());
+            additionalFields.put("color", request.getColor());
             
-            return ResponseEntity.ok(response);
+            return SuccessResponseBuilder.buildSuccessResponseEntity(
+                ApplicationConstants.LIGHT_COMMAND_SUCCESS, 
+                additionalFields
+            );
             
         } catch (IllegalArgumentException e) {
             logger.error("Invalid request for device '{}': {}", deviceName, e.getMessage());
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
+            return ErrorResponseBuilder.buildErrorResponseEntity(false, e.getMessage(), 400);
             
         } catch (TuyaLightingService.TuyaLightingException e) {
             // Log full error details server-side only
             logger.error("Error controlling light '{}': {}", deviceName, e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
             
-            // Provide user-friendly error messages without exposing internal details
-            String errorMessage = "Unable to control device. Please try again later.";
-            String userMessage = e.getMessage();
-            if (userMessage != null) {
-                if (userMessage.contains("connect") || userMessage.contains("broker")) {
-                    errorMessage = "MQTT connection error. Please verify the Mosquitto broker is running.";
-                } else if (userMessage.contains("publish")) {
-                    errorMessage = "Failed to send MQTT command. Please check the broker connection.";
-                } else if (userMessage.contains("Device not found") || userMessage.contains("unknown")) {
-                    errorMessage = "Device not found or unavailable.";
-                }
-            }
+            String errorMessage = ErrorResponseBuilder.mapToUserFriendlyMessage(
+                e.getMessage(), 
+                ApplicationConstants.DEVICE_CONTROL_ERROR
+            );
             
-            error.put("success", false);
-            error.put("message", errorMessage);
-            return ResponseEntity.internalServerError().body(error);
+            return ErrorResponseBuilder.buildErrorResponseEntity(false, errorMessage, 500);
             
         } catch (Exception e) {
             // Log full error details server-side only
             logger.error("Unexpected error controlling light '{}': {}", deviceName, e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "An unexpected error occurred while controlling the device.");
-            return ResponseEntity.internalServerError().body(error);
+            return ErrorResponseBuilder.buildErrorResponseEntity(
+                false, 
+                ApplicationConstants.UNEXPECTED_ERROR + " while controlling the device.", 
+                500
+            );
         }
     }
     
@@ -136,18 +128,10 @@ public class LightingController {
             // Log full error details server-side only
             logger.error("Error getting status for device '{}': {}", deviceName, e.getMessage(), e);
             
-            // Provide user-friendly error messages without exposing internal details
-            String errorMessage = "Unable to retrieve device status. Please try again later.";
-            String userMessage = e.getMessage();
-            if (userMessage != null) {
-                if (userMessage.contains("Timeout")) {
-                    errorMessage = "Request timeout. Please verify the bridge is running.";
-                } else if (userMessage.contains("connect") || userMessage.contains("broker")) {
-                    errorMessage = "MQTT connection error. Please verify the Mosquitto broker is running.";
-                } else if (userMessage.contains("Device not found") || userMessage.contains("unknown")) {
-                    errorMessage = "Device not found or unavailable.";
-                }
-            }
+            String errorMessage = ErrorResponseBuilder.mapToUserFriendlyMessage(
+                e.getMessage(), 
+                ApplicationConstants.DEVICE_STATUS_ERROR
+            );
             
             LightStatusResponse errorResponse = LightStatusResponse.builder()
                     .success(false)
@@ -164,7 +148,7 @@ public class LightingController {
             LightStatusResponse errorResponse = LightStatusResponse.builder()
                     .success(false)
                     .device(deviceName)
-                    .message("An unexpected error occurred while retrieving device status.")
+                    .message(ApplicationConstants.UNEXPECTED_ERROR + " while retrieving device status.")
                     .build();
             
             return ResponseEntity.internalServerError().body(errorResponse);

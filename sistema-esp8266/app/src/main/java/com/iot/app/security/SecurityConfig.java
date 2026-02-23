@@ -21,7 +21,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.web.cors.CorsConfigurationSource;
+import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.filter.RateLimitFilter;
+import com.iot.app.filter.RequestIdFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.regex.Pattern;
 
@@ -80,9 +82,17 @@ public class SecurityConfig {
             HttpSecurity http, 
             CorsConfigurationSource corsConfigurationSource,
             JwtAuthenticationFilter jwtAuthenticationFilter,
-            RateLimitFilter rateLimitFilter) throws Exception {
+            RateLimitFilter rateLimitFilter,
+            RequestIdFilter requestIdFilter) throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.deny())
+                        .contentTypeOptions(contentType -> {}) // Enables X-Content-Type-Options: nosniff by default
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .maxAgeInSeconds(ApplicationConstants.HSTS_MAX_AGE_SECONDS))
+                        .contentSecurityPolicy(csp -> csp
+                                .policyDirectives("default-src 'self'; script-src 'self'; style-src 'self';")))
                 .csrf(csrf -> {
                     // Disable CSRF for API endpoints (stateless JWT authentication)
                     // CSRF protection is not needed for stateless APIs using JWT tokens
@@ -101,6 +111,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         // All other requests require authentication
                         .anyRequest().authenticated())
+                .addFilterBefore(requestIdFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .exceptionHandling(exceptions -> exceptions

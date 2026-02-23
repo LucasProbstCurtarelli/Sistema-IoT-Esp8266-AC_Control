@@ -1,10 +1,12 @@
 package com.iot.app.controller;
 
+import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.LoginRequest;
 import com.iot.app.dto.LoginResponse;
-import com.iot.app.model.User;
-import com.iot.app.repository.UserRepository;
 import com.iot.app.security.JwtTokenProvider;
+import com.iot.app.service.AuthService;
+import com.iot.app.util.ErrorResponseBuilder;
+import com.iot.app.util.SuccessResponseBuilder;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -14,15 +16,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -39,20 +36,12 @@ public class AuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
     
-    private final AuthenticationManager authenticationManager;
+    private final AuthService authService;
     private final JwtTokenProvider jwtTokenProvider;
-    private final UserDetailsService userDetailsService;
-    private final UserRepository userRepository;
 
-    public AuthController(
-            AuthenticationManager authenticationManager,
-            JwtTokenProvider jwtTokenProvider,
-            UserDetailsService userDetailsService,
-            UserRepository userRepository) {
-        this.authenticationManager = authenticationManager;
+    public AuthController(AuthService authService, JwtTokenProvider jwtTokenProvider) {
+        this.authService = authService;
         this.jwtTokenProvider = jwtTokenProvider;
-        this.userDetailsService = userDetailsService;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -68,20 +57,10 @@ public class AuthController {
             HttpServletResponse response) {
         
         String username = loginRequest.getUsername();
-        String password = loginRequest.getPassword();
         
         try {
-
-            // Log login attempt at debug level only (no sensitive information)
-            logger.debug("Login attempt for username: {}", username);
-
-            // Authenticate user - throws exception if credentials are invalid
-            authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(username, password)
-            );
-
-            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-            String token = jwtTokenProvider.generateToken(userDetails);
+            LoginResponse loginResponse = authService.authenticate(loginRequest);
+            String token = loginResponse.getToken();
 
             // Set JWT token in httpOnly cookie using ResponseCookie (modern approach)
             // secure flag is environment-based: true in production (HTTPS), false in development (HTTP)
@@ -90,38 +69,22 @@ public class AuthController {
             boolean secureCookie = isProduction || "true".equalsIgnoreCase(System.getenv("COOKIE_SECURE"));
             
             ResponseCookie cookie = ResponseCookie
-                    .from("authToken", token)
+                    .from(ApplicationConstants.AUTH_TOKEN_COOKIE_NAME, token)
                     .httpOnly(true)
                     .secure(secureCookie)
                     .path("/")
-                    .maxAge(86400) // 24 hours
+                    .maxAge(ApplicationConstants.COOKIE_MAX_AGE_SECONDS)
                     .sameSite("Lax") // Lax allows cookies to be sent in top-level navigations
                     .build();
 
             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-
-            // Get user info from database
-            User user = userRepository.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
-
-            LoginResponse loginResponse = new LoginResponse(true, "Login realizado com sucesso");
-            loginResponse.setToken(token);
-            
-            LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
-                user.getId().toString(),
-                user.getUsername(),
-                user.getUsername() + "@automacao.com"
-            );
-            loginResponse.setUser(userInfo);
-            
-            logger.info("User '{}' logged in successfully", username);
             
             return ResponseEntity.ok(loginResponse);
 
         } catch (Exception e) {
             // Log authentication failure at warn level (generic message, no sensitive details)
             logger.warn("Authentication failed for username: {}", username);
-            LoginResponse errorResponse = new LoginResponse(false, "Credenciais inválidas");
+            LoginResponse errorResponse = new LoginResponse(false, "Invalid credentials");
             return ResponseEntity.status(401).body(errorResponse);
         }
     }
@@ -142,14 +105,7 @@ public class AuthController {
             }
             
             String username = authentication.getName();
-            User user = userRepository.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
-            
-            LoginResponse.UserInfo userInfo = new LoginResponse.UserInfo(
-                user.getId().toString(),
-                user.getUsername(),
-                user.getUsername() + "@automacao.com"
-            );
+            LoginResponse.UserInfo userInfo = authService.getUserInfo(username);
             
             return ResponseEntity.ok(userInfo);
             
@@ -177,17 +133,18 @@ public class AuthController {
                 logger.info("Token revoked for user logout");
             }
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Logout successful");
-            return ResponseEntity.ok(response);
+            return SuccessResponseBuilder.buildSuccessResponseEntity(
+                "Logout successful", 
+                null
+            );
             
         } catch (Exception e) {
             logger.error("Error during logout: {}", e.getMessage());
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", false);
-            response.put("message", "Logout failed");
-            return ResponseEntity.status(500).body(response);
+            return ErrorResponseBuilder.buildErrorResponseEntity(
+                false, 
+                "Logout failed", 
+                500
+            );
         }
     }
     
@@ -200,15 +157,15 @@ public class AuthController {
     private String extractTokenFromRequest(HttpServletRequest request) {
         // Try Authorization header first
         String bearerToken = request.getHeader("Authorization");
-        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
+        if (bearerToken != null && bearerToken.startsWith(ApplicationConstants.BEARER_PREFIX)) {
+            return bearerToken.substring(ApplicationConstants.BEARER_PREFIX.length());
         }
         
         // Try cookie
         jakarta.servlet.http.Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (jakarta.servlet.http.Cookie cookie : cookies) {
-                if ("authToken".equals(cookie.getName())) {
+                if (ApplicationConstants.AUTH_TOKEN_COOKIE_NAME.equals(cookie.getName())) {
                     return cookie.getValue();
                 }
             }
