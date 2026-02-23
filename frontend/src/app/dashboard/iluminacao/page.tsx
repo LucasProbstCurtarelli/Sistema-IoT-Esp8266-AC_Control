@@ -33,6 +33,9 @@ export default function IluminacaoPage() {
   // Track states for all lights
   const [lightStates, setLightStates] = useState<Record<string, LightState>>({});
   
+  // Track linked lights - maps deviceName to array of linked device names
+  const [linkedLights, setLinkedLights] = useState<Record<string, string[]>>({});
+  
   // Loading states for bulk actions
   const [isTurningOffAll, setIsTurningOffAll] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -173,6 +176,74 @@ export default function IluminacaoPage() {
     }));
   }, []);
 
+  /**
+   * Handles state changes for linked devices when a command is propagated.
+   * Merges the new state with the existing state of the linked device.
+   */
+  const handleLinkedDeviceStateChange = useCallback((deviceName: string, stateUpdate: LightState) => {
+    setLightStates(prev => {
+      const currentState = prev[deviceName] || { ...DEFAULT_LIGHT_STATE };
+      // Only update fields that are actually provided in stateUpdate
+      const mergedState: LightState = {
+        state: stateUpdate.state !== undefined ? stateUpdate.state : currentState.state,
+        brightness: stateUpdate.brightness !== undefined ? stateUpdate.brightness : currentState.brightness,
+        color: stateUpdate.color !== undefined ? stateUpdate.color : currentState.color,
+      };
+      return {
+        ...prev,
+        [deviceName]: mergedState,
+      };
+    });
+  }, []);
+
+  /**
+   * Toggles linking between two lights.
+   * When linking, creates a bidirectional link between the two devices.
+   */
+  const handleLinkToggle = useCallback((deviceName1: string, deviceName2: string) => {
+    setLinkedLights(prev => {
+      const newLinks = { ...prev };
+      
+      // Get current links for both devices
+      const links1 = newLinks[deviceName1] || [];
+      const links2 = newLinks[deviceName2] || [];
+      
+      // Check if they're already linked
+      const isLinked = links1.includes(deviceName2) || links2.includes(deviceName1);
+      
+      if (isLinked) {
+        // Unlink: remove from both arrays
+        newLinks[deviceName1] = links1.filter(name => name !== deviceName2);
+        newLinks[deviceName2] = links2.filter(name => name !== deviceName1);
+        
+        // Clean up empty arrays
+        if (newLinks[deviceName1].length === 0) delete newLinks[deviceName1];
+        if (newLinks[deviceName2].length === 0) delete newLinks[deviceName2];
+      } else {
+        // Link: add to both arrays
+        newLinks[deviceName1] = [...links1, deviceName2];
+        newLinks[deviceName2] = [...links2, deviceName1];
+      }
+      
+      return newLinks;
+    });
+  }, []);
+
+  /**
+   * Gets all devices linked to a given device.
+   */
+  const getLinkedDevices = useCallback((deviceName: string): string[] => {
+    return linkedLights[deviceName] || [];
+  }, [linkedLights]);
+
+  /**
+   * Checks if a device is linked to any other device.
+   */
+  const isDeviceLinked = useCallback((deviceName: string): boolean => {
+    const links = linkedLights[deviceName];
+    return links !== undefined && links.length > 0;
+  }, [linkedLights]);
+
   // Load devices on mount
   useEffect(() => {
     loadDevices();
@@ -252,6 +323,14 @@ export default function IluminacaoPage() {
               location={device.location}
               initialState={lightStates[device.deviceName]}
               onStateChange={handleLightStateChange}
+              linkedDevices={getLinkedDevices(device.deviceName)}
+              isLinked={isDeviceLinked(device.deviceName)}
+              availableDevices={devices.filter(d => d.deviceName !== device.deviceName).map(d => ({
+                deviceName: d.deviceName,
+                displayName: d.displayName,
+              }))}
+              onLinkToggle={handleLinkToggle}
+              onLinkedDeviceStateChange={handleLinkedDeviceStateChange}
             />
           ))}
         </div>

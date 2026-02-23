@@ -1,14 +1,19 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Lightbulb, Power, Circle, Loader2 } from "lucide-react";
+import { Lightbulb, Power, Circle, Loader2, Link, Link2Off } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { lightingService, type LightCommandRequest } from "@/services/api";
 import { toast } from "sonner";
-import { useDebounce } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import { adjustBrightness, extractBrightness } from "@/lib/color-utils";
 
@@ -24,6 +29,11 @@ interface LightCardProps {
   location: string;
   initialState?: LightState;
   onStateChange?: (deviceName: string, state: LightState) => void;
+  linkedDevices?: string[];
+  isLinked?: boolean;
+  availableDevices?: Array<{ deviceName: string; displayName: string }>;
+  onLinkToggle?: (deviceName1: string, deviceName2: string) => void;
+  onLinkedDeviceStateChange?: (deviceName: string, state: LightState) => void;
 }
 
 /**
@@ -31,8 +41,9 @@ interface LightCardProps {
  * 
  * Features:
  * - On/Off toggle with optimistic updates
- * - Brightness slider with debounce (300ms)
- * - Color picker with debounce (150ms for better UX)
+ * - Brightness slider - commands sent on release (onValueCommit)
+ * - Color picker - commands sent on blur/release
+ * - Light linking - sync commands across linked lights
  * - Visual loading states
  * - Error handling with toast notifications
  */
@@ -42,30 +53,26 @@ function LightCardComponent({
   location,
   initialState = { state: false, brightness: 100, color: "#FFFFFF" },
   onStateChange,
+  linkedDevices = [],
+  isLinked = false,
+  availableDevices = [],
+  onLinkToggle,
+  onLinkedDeviceStateChange,
 }: LightCardProps) {
   // Main state
   const [lightState, setLightState] = useState<LightState>(initialState);
-  
-  // Local values for smooth UI (before debounce)
-  const [localBrightness, setLocalBrightness] = useState(initialState.brightness);
-  const [localColor, setLocalColor] = useState(initialState.color);
   
   // Loading states
   const [isToggling, setIsToggling] = useState(false);
   const [isSendingBrightness, setIsSendingBrightness] = useState(false);
   const [isSendingColor, setIsSendingColor] = useState(false);
   
-  // Refs to track previous debounced values and external state changes
-  const prevDebouncedBrightness = useRef<number | null>(null);
-  const prevDebouncedColor = useRef<string | null>(null);
+  // Refs to track external state changes
   const prevInitialState = useRef<LightState>(initialState);
-  const isInitialMount = useRef(true);
   const userInitiatedChange = useRef(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Debounced values - color has shorter debounce for better UX
-  const debouncedBrightness = useDebounce(localBrightness, 300);
-  const debouncedColor = useDebounce(localColor, 150);
+  const colorCommitInProgress = useRef(false);
+  const colorCommitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync with external state changes (e.g., from refreshLightStates)
   // This should NOT trigger command sends unless user initiated the change
@@ -88,32 +95,77 @@ function LightCardComponent({
         }
         
         setLightState(initialState);
-        setLocalBrightness(initialState.brightness);
-        setLocalColor(initialState.color);
-        
-        // Reset debounced refs to prevent triggering commands
-        prevDebouncedBrightness.current = initialState.brightness;
-        prevDebouncedColor.current = initialState.color;
       }
       // If user initiated change, don't sync - let user's change complete first
-      // The flag will be reset after command is sent (handled in sendCommand useEffects)
+      // The flag will be reset after command is sent
     }
     
     prevInitialState.current = initialState;
   }, [initialState]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (colorCommitTimeoutRef.current) {
+        clearTimeout(colorCommitTimeoutRef.current);
+      }
+    };
+  }, []);
+
   /**
    * Sends a command to the light with error handling.
+   * Also propagates the command to linked lights if any.
    * Returns true if successful, false otherwise.
    */
   const sendCommand = useCallback(async (
     command: LightCommandRequest,
     setLoading: (loading: boolean) => void,
+    propagateToLinked = true,
   ): Promise<boolean> => {
     setLoading(true);
     
     try {
+      // Send to this device
       await lightingService.sendCommand(deviceName, command);
+      
+      // Propagate to linked devices if enabled and there are linked devices
+      if (propagateToLinked && linkedDevices.length > 0) {
+        // Calculate the new state values from the command
+        const stateUpdate: Partial<LightState> = {};
+        if (command.state !== undefined) {
+          stateUpdate.state = command.state;
+        }
+        if (command.brightness !== undefined) {
+          stateUpdate.brightness = command.brightness;
+        }
+        if (command.color !== undefined) {
+          stateUpdate.color = command.color;
+          if (command.brightness === undefined) {
+            // Extract brightness from color if not explicitly provided
+            stateUpdate.brightness = extractBrightness(command.color);
+          }
+        }
+        
+        // Update parent state for linked devices optimistically BEFORE sending commands
+        if (onLinkedDeviceStateChange && Object.keys(stateUpdate).length > 0) {
+          linkedDevices.forEach(linkedDeviceName => {
+            onLinkedDeviceStateChange(linkedDeviceName, stateUpdate as LightState);
+          });
+        }
+        
+        // Send to all linked devices in parallel (don't wait for all to complete)
+        Promise.allSettled(
+          linkedDevices.map(linkedDeviceName =>
+            lightingService.sendCommand(linkedDeviceName, command)
+          )
+        ).then(results => {
+          const failures = results.filter(r => r.status === 'rejected');
+          if (failures.length > 0) {
+            console.warn(`[LightCard] Some linked devices failed to update:`, failures);
+          }
+        });
+      }
+      
       return true;
     } catch (error: unknown) {
       // Extract error message
@@ -144,7 +196,7 @@ function LightCardComponent({
     } finally {
       setLoading(false);
     }
-  }, [deviceName]);
+  }, [deviceName, linkedDevices, onLinkedDeviceStateChange, lightState]);
 
   /**
    * Toggles the light on/off.
@@ -160,12 +212,6 @@ function LightCardComponent({
     // Notify parent of state change
     onStateChange?.(deviceName, updatedState);
     
-    // Sync local values when turning on
-    if (newState) {
-      setLocalBrightness(lightState.brightness);
-      setLocalColor(lightState.color);
-    }
-    
     const success = await sendCommand({ state: newState }, setIsToggling);
     
     if (!success) {
@@ -177,40 +223,72 @@ function LightCardComponent({
   }, [lightState, sendCommand, deviceName, onStateChange]);
 
   /**
-   * Handles brightness slider changes.
+   * Handles brightness slider changes (while dragging - optimistic update only).
+   * Also updates linked devices in real-time.
    */
   const handleBrightnessChange = useCallback((value: number[]) => {
     const newBrightness = value[0];
     
-    // Mark as user-initiated change
-    userInitiatedChange.current = true;
-    
-    setLocalBrightness(newBrightness);
-    
     // Calculate adjusted hex color with new brightness (maintains hue and saturation)
     const adjustedColor = adjustBrightness(lightState.color, newBrightness);
-    setLocalColor(adjustedColor);
     
     // Optimistic update only if light is on
     if (lightState.state) {
       const updatedState = { ...lightState, brightness: newBrightness, color: adjustedColor };
       setLightState(updatedState);
       onStateChange?.(deviceName, updatedState);
+      
+      // Update linked devices in real-time (UI only, no commands sent yet)
+      if (linkedDevices.length > 0 && onLinkedDeviceStateChange) {
+        const stateUpdate: LightState = {
+          state: lightState.state,
+          brightness: newBrightness,
+          color: adjustedColor,
+        };
+        linkedDevices.forEach(linkedDeviceName => {
+          onLinkedDeviceStateChange(linkedDeviceName, stateUpdate);
+        });
+      }
     }
-  }, [lightState, deviceName, onStateChange]);
+  }, [lightState, deviceName, onStateChange, linkedDevices, onLinkedDeviceStateChange]);
 
   /**
-   * Handles color picker changes.
+   * Handles brightness slider commit (when user releases - send command).
    */
-  const handleColorChange = useCallback((color: string) => {
+  const handleBrightnessCommit = useCallback(async (value: number[]) => {
+    const newBrightness = value[0];
+    
+    // Skip if light is off
+    if (!lightState.state) return;
+    
     // Mark as user-initiated change
     userInitiatedChange.current = true;
     
-    setLocalColor(color);
+    // Calculate adjusted hex color with new brightness
+    const adjustedColor = adjustBrightness(lightState.color, newBrightness);
     
+    // Update state optimistically
+    const updatedState = { ...lightState, brightness: newBrightness, color: adjustedColor };
+    setLightState(updatedState);
+    onStateChange?.(deviceName, updatedState);
+    
+    // Send command
+    await sendCommand({ 
+      color: adjustedColor 
+    }, setIsSendingBrightness);
+    
+    // Reset flag after command completes
+    setTimeout(() => {
+      userInitiatedChange.current = false;
+    }, 100);
+  }, [lightState, deviceName, onStateChange, sendCommand]);
+
+  /**
+   * Handles color picker changes (while selecting - optimistic update only).
+   */
+  const handleColorChange = useCallback((color: string) => {
     // Extract brightness from the new color and sync it
     const extractedBrightness = extractBrightness(color);
-    setLocalBrightness(extractedBrightness);
     
     // Optimistic update only if light is on
     if (lightState.state) {
@@ -220,75 +298,39 @@ function LightCardComponent({
     }
   }, [lightState, deviceName, onStateChange]);
 
-  // Send brightness command after debounce
-  useEffect(() => {
-    // Skip initial mount
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      prevDebouncedBrightness.current = debouncedBrightness;
-      prevDebouncedColor.current = debouncedColor;
-      return;
-    }
-    
-    // Skip if value hasn't changed
-    if (prevDebouncedBrightness.current === debouncedBrightness) return;
-    
-    // Only send command if this is a user-initiated change
-    if (!userInitiatedChange.current) {
-      // External sync - just update ref without sending command
-      prevDebouncedBrightness.current = debouncedBrightness;
-      return;
-    }
-    
-    prevDebouncedBrightness.current = debouncedBrightness;
-    
+  /**
+   * Handles color picker commit (when user releases/blurs - send command).
+   */
+  const handleColorCommit = useCallback(async (color: string) => {
     // Skip if light is off
     if (!lightState.state) return;
     
-    // Calculate adjusted hex color with debounced brightness
-    // Use the current color from state to maintain hue and saturation
-    const adjustedColor = adjustBrightness(lightState.color, debouncedBrightness);
+    // Prevent duplicate sends if already processing
+    if (colorCommitInProgress.current) return;
     
-    // Send ONLY color with adjusted hex (no brightness field)
-    sendCommand({ 
-      color: adjustedColor 
-    }, setIsSendingBrightness).finally(() => {
-      // Reset flag after command completes (success or error)
+    // Mark as user-initiated change and set commit flag
+    userInitiatedChange.current = true;
+    colorCommitInProgress.current = true;
+    
+    // Extract brightness from the new color
+    const extractedBrightness = extractBrightness(color);
+    
+    // Update state optimistically
+    const updatedState = { ...lightState, color, brightness: extractedBrightness };
+    setLightState(updatedState);
+    onStateChange?.(deviceName, updatedState);
+    
+    try {
+      // Send command
+      await sendCommand({ color }, setIsSendingColor);
+    } finally {
+      // Reset flags after command completes
       setTimeout(() => {
         userInitiatedChange.current = false;
+        colorCommitInProgress.current = false;
       }, 100);
-    });
-  }, [debouncedBrightness, lightState.state, lightState.color, sendCommand]);
-
-  // Send color command after debounce
-  useEffect(() => {
-    // Skip initial mount
-    if (isInitialMount.current) {
-      return;
     }
-    
-    // Skip if value hasn't changed
-    if (prevDebouncedColor.current === debouncedColor) return;
-    
-    // Only send command if this is a user-initiated change
-    if (!userInitiatedChange.current) {
-      // External sync - just update ref without sending command
-      prevDebouncedColor.current = debouncedColor;
-      return;
-    }
-    
-    prevDebouncedColor.current = debouncedColor;
-    
-    // Skip if light is off
-    if (!lightState.state) return;
-    
-    sendCommand({ color: debouncedColor }, setIsSendingColor).finally(() => {
-      // Reset flag after command completes (success or error)
-      setTimeout(() => {
-        userInitiatedChange.current = false;
-      }, 100);
-    });
-  }, [debouncedColor, lightState.state, sendCommand]);
+  }, [lightState, deviceName, onStateChange, sendCommand]);
 
   const isLoading = isToggling || isSendingBrightness || isSendingColor;
   const showControls = lightState.state;
@@ -307,9 +349,56 @@ function LightCardComponent({
             )} />
             <CardTitle>{displayName}</CardTitle>
           </div>
-          {isLoading && (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          )}
+          <div className="flex items-center gap-2">
+            {isLoading && (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            {onLinkToggle && availableDevices.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "h-8 w-8",
+                      isLinked && "text-primary"
+                    )}
+                    title={isLinked ? "Desvincular lâmpadas" : "Vincular lâmpadas"}
+                  >
+                    {isLinked ? (
+                      <Link className="h-4 w-4" />
+                    ) : (
+                      <Link2Off className="h-4 w-4" />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {availableDevices.map((device) => {
+                    const isCurrentlyLinked = linkedDevices.includes(device.deviceName);
+                    return (
+                      <DropdownMenuItem
+                        key={device.deviceName}
+                        onClick={() => onLinkToggle(deviceName, device.deviceName)}
+                        className="flex items-center gap-2"
+                      >
+                        {isCurrentlyLinked ? (
+                          <>
+                            <Link className="h-4 w-4 text-primary" />
+                            <span>Desvincular de {device.displayName}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Link2Off className="h-4 w-4" />
+                            <span>Vincular com {device.displayName}</span>
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
         <CardDescription>{location}</CardDescription>
       </CardHeader>
@@ -376,6 +465,7 @@ function LightCardComponent({
             step={1}
             value={[lightState.brightness]}
             onValueChange={handleBrightnessChange}
+            onValueCommit={handleBrightnessCommit}
             disabled={!showControls || isToggling}
           />
         </div>
@@ -395,7 +485,56 @@ function LightCardComponent({
               id={`color-${deviceName}`}
               type="color"
               value={lightState.color}
-              onChange={(e) => handleColorChange(e.target.value)}
+              onChange={(e) => {
+                // Update UI while dragging
+                handleColorChange(e.target.value);
+                
+                // Clear any pending commit timeout
+                if (colorCommitTimeoutRef.current) {
+                  clearTimeout(colorCommitTimeoutRef.current);
+                }
+                
+                // Schedule commit after a short delay (debounce)
+                // This will be cancelled if another change happens quickly
+                colorCommitTimeoutRef.current = setTimeout(() => {
+                  if (!colorCommitInProgress.current) {
+                    handleColorCommit(e.target.value);
+                  }
+                }, 150);
+              }}
+              onMouseUp={(e) => {
+                // Clear debounce timeout and commit immediately on mouse release
+                if (colorCommitTimeoutRef.current) {
+                  clearTimeout(colorCommitTimeoutRef.current);
+                  colorCommitTimeoutRef.current = null;
+                }
+                const target = e.target as HTMLInputElement;
+                if (target.value && !colorCommitInProgress.current) {
+                  handleColorCommit(target.value);
+                }
+              }}
+              onPointerUp={(e) => {
+                // Clear debounce timeout and commit immediately on pointer release
+                if (colorCommitTimeoutRef.current) {
+                  clearTimeout(colorCommitTimeoutRef.current);
+                  colorCommitTimeoutRef.current = null;
+                }
+                const target = e.target as HTMLInputElement;
+                if (target.value && !colorCommitInProgress.current) {
+                  handleColorCommit(target.value);
+                }
+              }}
+              onTouchEnd={(e) => {
+                // Clear debounce timeout and commit immediately on touch end
+                if (colorCommitTimeoutRef.current) {
+                  clearTimeout(colorCommitTimeoutRef.current);
+                  colorCommitTimeoutRef.current = null;
+                }
+                const target = e.target as HTMLInputElement;
+                if (target.value && !colorCommitInProgress.current) {
+                  handleColorCommit(target.value);
+                }
+              }}
               disabled={!showControls || isToggling}
               className={cn(
                 "h-10 w-20 cursor-pointer rounded-md border border-input bg-background transition-all",
