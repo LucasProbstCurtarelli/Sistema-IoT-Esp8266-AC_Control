@@ -126,10 +126,30 @@ export interface LightCommandRequest {
   color?: string; // "#RRGGBB"
 }
 
+export interface AcStatusResponse {
+  connected: boolean;
+  lastMessageTimestamp: number;
+  lastMessageSecondsAgo: number;
+}
+
 export const acService = {
   sendCommand: async (payload: AcPayload) => {
     const response = await api.post('/api/ac', payload);
     return response.data;
+  },
+  getStatus: async (): Promise<AcStatusResponse> => {
+    try {
+      const response = await api.get('/api/ac/status', { timeout: 5000 });
+      return response.data;
+    } catch (error) {
+      // On timeout or error, return disconnected status
+      console.error('[AcService] Error getting status:', error);
+      return {
+        connected: false,
+        lastMessageTimestamp: 0,
+        lastMessageSecondsAgo: -1,
+      };
+    }
   },
 };
 

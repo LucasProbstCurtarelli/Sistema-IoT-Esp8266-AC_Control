@@ -1,15 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Snowflake, Power, Minus, Plus } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { acService } from "@/services/api";
 import { toast } from "sonner";
 
 export default function ArCondicionadoPage() {
   const [currentTemp, setCurrentTemp] = useState(22);
   const [isLoadingAc, setIsLoadingAc] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+
+  const checkConnectionStatus = async () => {
+    try {
+      const status = await acService.getStatus();
+      setIsConnected((prev) => {
+        // Only update if status actually changed to prevent unnecessary re-renders
+        if (prev !== status.connected) {
+          return status.connected;
+        }
+        return prev;
+      });
+    } catch (error) {
+      console.error("Error checking connection status:", error);
+      setIsConnected(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check connection status on mount
+    checkConnectionStatus();
+    
+    // Check connection status every 30 seconds
+    const interval = setInterval(checkConnectionStatus, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   const changeTemp = (delta: number) => {
     setCurrentTemp((prev) => {
@@ -28,6 +56,11 @@ export default function ArCondicionadoPage() {
       toast.success("Comando enviado com sucesso!", {
         description: `Ar condicionado ${powerState === "on" ? "ligado" : "desligado"} a ${currentTemp}°C`,
       });
+      
+      // Check connection status after sending command (with delay to allow ESP to process)
+      setTimeout(() => {
+        checkConnectionStatus();
+      }, 1000);
     } catch (error) {
       toast.error("Erro ao enviar comando", {
         description: "Não foi possível comunicar com o dispositivo",
@@ -37,6 +70,8 @@ export default function ArCondicionadoPage() {
     }
   };
 
+  const isDisabled = isConnected === false || isLoadingAc;
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -45,6 +80,20 @@ export default function ArCondicionadoPage() {
           Controle de temperatura e energia
         </p>
       </div>
+
+      {isConnected === null && (
+        <Alert>
+          <AlertDescription>Verificando conexão...</AlertDescription>
+        </Alert>
+      )}
+
+      {isConnected === false && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            O dispositivo ESP8266 está desconectado. As interações estão bloqueadas até que a conexão seja restaurada.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card>
@@ -66,7 +115,7 @@ export default function ArCondicionadoPage() {
                 variant="outline"
                 size="icon"
                 onClick={() => changeTemp(-1)}
-                disabled={currentTemp <= 17 || isLoadingAc}
+                disabled={currentTemp <= 17 || isDisabled}
               >
                 <Minus className="h-4 w-4" />
               </Button>
@@ -74,7 +123,7 @@ export default function ArCondicionadoPage() {
                 variant="outline"
                 size="icon"
                 onClick={() => changeTemp(1)}
-                disabled={currentTemp >= 30 || isLoadingAc}
+                disabled={currentTemp >= 30 || isDisabled}
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -83,7 +132,7 @@ export default function ArCondicionadoPage() {
             <div className="flex flex-col gap-2">
               <Button
                 onClick={() => sendAcCommand("on")}
-                disabled={isLoadingAc}
+                disabled={isDisabled}
                 className="w-full"
                 size="lg"
               >
@@ -93,7 +142,7 @@ export default function ArCondicionadoPage() {
               <Button
                 variant="destructive"
                 onClick={() => sendAcCommand("off")}
-                disabled={isLoadingAc}
+                disabled={isDisabled}
                 className="w-full"
                 size="lg"
               >
