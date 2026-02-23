@@ -3,6 +3,7 @@ package com.iot.app.controller;
 import com.iot.app.config.AcConfig;
 import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.AcPayload;
+import com.iot.app.service.AcConnectionMonitorService;
 import com.iot.app.service.IMqttService;
 import com.iot.app.util.ErrorResponseBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +12,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * REST controller for managing Air Conditioner via ESP8266.
@@ -37,10 +41,12 @@ public class AcController {
     
     private final IMqttService mqttService;
     private final ObjectMapper objectMapper;
+    private final AcConnectionMonitorService connectionMonitorService;
 
-    public AcController(IMqttService mqttService, ObjectMapper objectMapper) {
+    public AcController(IMqttService mqttService, ObjectMapper objectMapper, AcConnectionMonitorService connectionMonitorService) {
         this.mqttService = mqttService;
         this.objectMapper = objectMapper;
+        this.connectionMonitorService = connectionMonitorService;
     }
 
     /**
@@ -70,5 +76,28 @@ public class AcController {
             );
             return ErrorResponseBuilder.buildErrorResponseEntity(false, userMessage, 500);
         }
+    }
+
+    /**
+     * Endpoint to check the connection status of the ESP8266 AC device.
+     * 
+     * @return HTTP response with connection status information
+     */
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> getStatus() {
+        boolean isOnline = connectionMonitorService.isDeviceOnline();
+        long lastMessageTimestamp = connectionMonitorService.getLastMessageTimestamp();
+        long lastMessageSecondsAgo = lastMessageTimestamp > 0 
+            ? (System.currentTimeMillis() - lastMessageTimestamp) / 1000 
+            : -1;
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("connected", isOnline);
+        response.put("lastMessageTimestamp", lastMessageTimestamp);
+        response.put("lastMessageSecondsAgo", lastMessageSecondsAgo);
+        
+        logger.debug("AC status check: connected={}, lastMessageSecondsAgo={}", isOnline, lastMessageSecondsAgo);
+        
+        return ResponseEntity.ok(response);
     }
 }
