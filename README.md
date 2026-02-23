@@ -36,7 +36,7 @@ export JWT_SECRET="seu-secret-aqui-minimo-32-caracteres"
 ### Banco de Dados
 
 **Primeira vez ou reset completo:**
-1. Execute o script `init_database.sql` no MySQL Workbench
+1. Execute o script `docs/database/init_database.sql` no MySQL Workbench
 2. Isso cria o banco do zero com todas as tabelas e dados iniciais
 
 **Migrações automáticas:**
@@ -47,10 +47,14 @@ O Flyway gerencia migrações futuras automaticamente. As migrações estão em:
 
 ```
 ├── frontend/              # Interface Next.js
-├── sistema-esp8266/      # Backend Spring Boot
-├── tuya-mqtt-bridge.js   # Bridge MQTT → Tuya
+├── sistema-esp8266/       # Backend Spring Boot
+├── node-red/              # Node-RED flows e configuração
+├── mosquitto/             # Configuração MQTT broker
+├── tuya-mqtt/             # Bridge MQTT → Tuya e configuração
+├── firmware/              # Firmware Arduino/ESP8266
+├── docs/                  # Documentação e scripts de banco
 ├── docker-compose.yml     # Configuração Docker
-└── package.json          # Scripts de inicialização
+└── package.json           # Scripts de inicialização
 ```
 
 ## 🔐 Credenciais Padrão (Desenvolvimento)

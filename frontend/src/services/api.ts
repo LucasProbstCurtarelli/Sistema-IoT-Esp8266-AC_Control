@@ -283,15 +283,4 @@ export const lightingService = {
       throw error;
     }
   },
-  
-  /**
-   * Sets the light state (on/off) - maintained for backward compatibility.
-   * 
-   * @param deviceName The device name
-   * @param isOn True to turn on, false to turn off
-   * @returns Promise with the API response
-   */
-  setLightState: async (deviceName: string, isOn: boolean) => {
-    return lightingService.sendCommand(deviceName, { state: isOn });
-  },
 };

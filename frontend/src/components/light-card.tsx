@@ -70,7 +70,6 @@ function LightCardComponent({
   // Refs to track external state changes
   const prevInitialState = useRef<LightState>(initialState);
   const userInitiatedChange = useRef(false);
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const colorCommitInProgress = useRef(false);
   const colorCommitTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -89,11 +88,6 @@ function LightCardComponent({
       // Only sync if this is NOT a user-initiated change
       // If user is changing something, don't override their changes
       if (!userInitiatedChange.current) {
-        // Clear any pending sync timeout
-        if (syncTimeoutRef.current) {
-          clearTimeout(syncTimeoutRef.current);
-        }
-        
         setLightState(initialState);
       }
       // If user initiated change, don't sync - let user's change complete first

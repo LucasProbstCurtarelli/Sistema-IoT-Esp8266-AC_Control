@@ -9,7 +9,7 @@
         "nodered": "cd node-red && npm start",
         "springboot": "cd sistema-esp8266/app && mvnw.cmd spring-boot:run",
         "frontend": "cd frontend && npm run dev",
-        "tuya-bridge": "node tuya-mqtt-bridge.js",
+        "tuya-bridge": "node tuya-mqtt/tuya-mqtt-bridge.js",
         "stop": "docker compose down"
     },
     "devDependencies": {
