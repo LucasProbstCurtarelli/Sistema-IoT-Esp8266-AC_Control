@@ -1,9 +1,18 @@
 package com.iot.app.security;
 
+import com.iot.app.constants.ApplicationConstants;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -25,6 +34,9 @@ import java.util.concurrent.TimeUnit;
 public class TokenBlacklistService {
 
     private static final Logger logger = LoggerFactory.getLogger(TokenBlacklistService.class);
+    
+    @Value("${jwt.secret:}")
+    private String jwtSecret;
     
     /**
      * In-memory blacklist of revoked tokens.
@@ -81,15 +93,75 @@ public class TokenBlacklistService {
      */
     private void cleanupExpiredTokens() {
         int sizeBefore = blacklist.size();
-        // Note: We can't easily check expiration without parsing the token
-        // For simplicity, we rely on natural expiration and periodic cleanup
-        // In a production system with Redis, TTL would handle this automatically
-        if (sizeBefore > 10000) {
-            // If blacklist grows too large, clear it (tokens should have expired by then)
-            logger.warn("Token blacklist size ({}) exceeds threshold, clearing", sizeBefore);
+        if (sizeBefore == 0) {
+            return;
+        }
+        
+        Date now = new Date();
+        int removedCount = 0;
+        
+        // Parse tokens and remove only expired ones
+        Iterator<String> iterator = blacklist.iterator();
+        while (iterator.hasNext()) {
+            String token = iterator.next();
+            try {
+                Date expiration = extractExpiration(token);
+                if (expiration != null && expiration.before(now)) {
+                    iterator.remove();
+                    removedCount++;
+                }
+            } catch (Exception e) {
+                // If token parsing fails, remove it (invalid token)
+                iterator.remove();
+                removedCount++;
+                logger.debug("Removed invalid token during cleanup: {}", e.getMessage());
+            }
+        }
+        
+        if (removedCount > 0) {
+            logger.debug("Token blacklist cleanup: removed {} expired tokens (size: {} -> {})", 
+                    removedCount, sizeBefore, blacklist.size());
+        }
+        
+        // Fallback: if blacklist still grows too large, clear it
+        if (blacklist.size() > ApplicationConstants.TOKEN_BLACKLIST_MAX_SIZE) {
+            logger.warn("Token blacklist size ({}) exceeds threshold, clearing all entries", blacklist.size());
             blacklist.clear();
         }
-        logger.debug("Token blacklist cleanup completed (size: {})", blacklist.size());
+    }
+    
+    /**
+     * Extracts expiration date from JWT token.
+     * 
+     * @param token The JWT token
+     * @return Expiration date, or null if parsing fails
+     */
+    private Date extractExpiration(String token) {
+        try {
+            // Get secret from environment or use default for dev
+            String secret = jwtSecret;
+            if (secret == null || secret.isEmpty()) {
+                String envSecret = System.getenv("JWT_SECRET");
+                if (envSecret != null && !envSecret.isEmpty()) {
+                    secret = envSecret;
+                } else {
+                    // Fallback to dev secret for parsing only
+                    secret = "dev-secret-key-minimum-32-characters-long-for-testing-only-do-not-use-in-production";
+                }
+            }
+            
+            SecretKey signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+            Claims claims = Jwts.parser()
+                    .verifyWith(signingKey)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            
+            return claims.getExpiration();
+        } catch (Exception e) {
+            logger.debug("Failed to extract expiration from token: {}", e.getMessage());
+            return null;
+        }
     }
     
     /**

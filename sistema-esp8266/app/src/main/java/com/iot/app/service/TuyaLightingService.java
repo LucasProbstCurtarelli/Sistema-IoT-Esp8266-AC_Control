@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.LightCommandRequest;
 import com.iot.app.dto.LightStatusResponse;
 import org.eclipse.paho.client.mqttv3.*;
@@ -124,7 +125,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             throw new IllegalArgumentException("At least one field must be provided (state, brightness, or color)");
         }
         
-        String topic = "tuya/" + deviceName + "/command";
+        String topic = ApplicationConstants.TUYA_TOPIC_PREFIX + deviceName + ApplicationConstants.TUYA_COMMAND_SUFFIX;
         ObjectNode payload = objectMapper.createObjectNode();
         ObjectNode dpsNode = objectMapper.createObjectNode();
         boolean hasColor = request.getColor() != null;
@@ -239,7 +240,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             queryPayload.put("correlationId", correlationId);
             queryPayload.put("timestamp", System.currentTimeMillis());
             
-            String queryTopic = "tuya/" + deviceName + "/query";
+            String queryTopic = ApplicationConstants.TUYA_TOPIC_PREFIX + deviceName + ApplicationConstants.TUYA_QUERY_SUFFIX;
             String jsonPayload;
             try {
                 jsonPayload = objectMapper.writeValueAsString(queryPayload);
@@ -287,7 +288,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
                 return;
             }
             
-            String stateTopic = "tuya/+/state";
+            String stateTopic = ApplicationConstants.TUYA_STATE_TOPIC_PATTERN;
             mqttClient.subscribe(stateTopic, QOS, new IMqttMessageListener() {
                 @Override
                 public void messageArrived(String topic, MqttMessage message) throws Exception {
@@ -572,6 +573,23 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         }
     }
 
+    /**
+     * Checks if the MQTT client is currently connected.
+     * 
+     * @return true if connected, false otherwise
+     */
+    public boolean isMqttConnected() {
+        connectionLock.lock();
+        try {
+            return mqttClient != null && mqttClient.isConnected();
+        } catch (Exception e) {
+            logger.debug("Error checking MQTT connection status: {}", e.getMessage());
+            return false;
+        } finally {
+            connectionLock.unlock();
+        }
+    }
+    
     /**
      * Handles connection errors and triggers reconnection if needed.
      */

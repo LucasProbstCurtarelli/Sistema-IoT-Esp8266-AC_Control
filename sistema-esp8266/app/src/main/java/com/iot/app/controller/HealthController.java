@@ -1,5 +1,6 @@
 package com.iot.app.controller;
 
+import com.iot.app.service.TuyaLightingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,12 @@ import java.util.Map;
 public class HealthController {
 
     private static final Logger logger = LoggerFactory.getLogger(HealthController.class);
+    
+    private final TuyaLightingService tuyaLightingService;
+    
+    public HealthController(TuyaLightingService tuyaLightingService) {
+        this.tuyaLightingService = tuyaLightingService;
+    }
 
     /**
      * Basic health check endpoint.
@@ -68,6 +75,20 @@ public class HealthController {
         system.put("osName", System.getProperty("os.name"));
         system.put("osVersion", System.getProperty("os.version"));
         health.put("system", system);
+        
+        // MQTT connection status
+        Map<String, Object> mqtt = new HashMap<>();
+        try {
+            boolean isConnected = tuyaLightingService.isMqttConnected();
+            mqtt.put("connected", isConnected);
+            mqtt.put("status", isConnected ? "UP" : "DOWN");
+        } catch (Exception e) {
+            logger.warn("Error checking MQTT connection status: {}", e.getMessage());
+            mqtt.put("connected", false);
+            mqtt.put("status", "UNKNOWN");
+            mqtt.put("error", e.getMessage());
+        }
+        health.put("mqtt", mqtt);
         
         logger.debug("Detailed health check requested");
         return ResponseEntity.ok(health);

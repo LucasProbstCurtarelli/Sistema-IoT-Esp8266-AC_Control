@@ -36,7 +36,7 @@ public class GlobalExceptionHandler {
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
                 "Validation Error",
-                "Dados de entrada inválidos",
+                "Invalid input data",
                 request.getRequestURI()
         );
         errorResponse.setDetails(errors);
@@ -57,7 +57,7 @@ public class GlobalExceptionHandler {
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.BAD_REQUEST.value(),
                 "Validation Error",
-                "Violação de restrições de validação",
+                "Validation constraint violation",
                 request.getRequestURI()
         );
         errorResponse.setDetails(errors);
@@ -73,7 +73,7 @@ public class GlobalExceptionHandler {
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.UNAUTHORIZED.value(),
                 "Authentication Error",
-                "Credenciais inválidas",
+                "Invalid credentials",
                 request.getRequestURI()
         );
 
@@ -103,7 +103,7 @@ public class GlobalExceptionHandler {
         ErrorResponse errorResponse = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
-                "Ocorreu um erro inesperado",
+                "An unexpected error occurred",
                 request.getRequestURI()
         );
 

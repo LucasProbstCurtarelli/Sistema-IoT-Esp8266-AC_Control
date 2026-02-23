@@ -1,14 +1,13 @@
 import axios from 'axios';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+import { API_CONFIG } from '@/config/api';
 
 export const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_CONFIG.baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
   withCredentials: true,
-  timeout: 10000, // 10 seconds timeout
+  timeout: API_CONFIG.timeout,
 });
 
 // Request interceptor - only log in development

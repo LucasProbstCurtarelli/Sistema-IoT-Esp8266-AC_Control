@@ -67,7 +67,7 @@ function CollapsibleItem({
                     >
                         {item.icon && <item.icon />}
                         <span>{item.title}</span>
-                        <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                        <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden" />
                     </SidebarMenuButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
@@ -116,10 +116,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <SidebarMenuItem>
                         <SidebarMenuButton size="lg" asChild>
                             <Link href="/dashboard" className="group/logo-link">
-                                <div className="flex aspect-square size-12 items-center justify-center rounded-lg bg-transparent transition-all duration-300 ease-in-out group-hover/logo-link:scale-105">
-                                    <LogoBrand className="size-10 transition-all duration-300 ease-in-out" animationType="slide" />
+                                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-transparent transition-all duration-300 ease-in-out group-hover/logo-link:scale-105 shrink-0">
+                                    <LogoBrand className="size-6 shrink-0" animationType="slide" />
                                 </div>
-                                <div className="grid flex-1 text-left text-sm leading-tight">
+                                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                                     <span className="truncate font-semibold">
                                         Automação
                                     </span>
@@ -184,7 +184,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarFooter>
                 <SidebarMenu>
                     <SidebarMenuItem>
-                        <div className="flex items-center gap-3 w-full px-2 py-2">
+                        <div className="flex items-center gap-3 w-full px-2 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-2">
                             <Avatar className="h-8 w-8 rounded-lg shrink-0">
                                 <AvatarImage
                                     src={user?.avatar || ""}
@@ -194,7 +194,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                     {getInitials(user?.name)}
                                 </AvatarFallback>
                             </Avatar>
-                            <div className="grid flex-1 text-left text-sm leading-tight min-w-0">
+                            <div className="grid flex-1 text-left text-sm leading-tight min-w-0 group-data-[collapsible=icon]:hidden">
                                 <span className="truncate font-semibold text-foreground">
                                     {user?.name || "Usuário"}
                                 </span>
@@ -206,7 +206,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                 variant="ghost"
                                 size="icon"
                                 onClick={handleLogout}
-                                className="shrink-0"
+                                className="shrink-0 group-data-[collapsible=icon]:hidden"
                                 title="Sair"
                             >
                                 <LogOut className="h-4 w-4" />
