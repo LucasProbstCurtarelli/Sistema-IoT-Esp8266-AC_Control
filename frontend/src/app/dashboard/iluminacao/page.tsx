@@ -16,6 +16,45 @@ const DEFAULT_LIGHT_STATE: LightState = {
   color: "#FFFFFF",
 };
 
+// LocalStorage key for persisting linked lights
+const LINKED_LIGHTS_STORAGE_KEY = "automacao_residencial_linked_lights";
+
+/**
+ * Loads linked lights from localStorage.
+ * Returns an empty object if no data exists or if parsing fails.
+ */
+function loadLinkedLightsFromStorage(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  
+  try {
+    const stored = localStorage.getItem(LINKED_LIGHTS_STORAGE_KEY);
+    if (!stored) return {};
+    
+    const parsed = JSON.parse(stored);
+    // Validate that it's an object with string keys and string array values
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    return {};
+  } catch (error) {
+    console.warn("[IluminacaoPage] Failed to load linked lights from storage:", error);
+    return {};
+  }
+}
+
+/**
+ * Saves linked lights to localStorage.
+ */
+function saveLinkedLightsToStorage(linkedLights: Record<string, string[]>): void {
+  if (typeof window === "undefined") return;
+  
+  try {
+    localStorage.setItem(LINKED_LIGHTS_STORAGE_KEY, JSON.stringify(linkedLights));
+  } catch (error) {
+    console.warn("[IluminacaoPage] Failed to save linked lights to storage:", error);
+  }
+}
+
 /**
  * Iluminação (Lighting) Dashboard Page
  * 
@@ -24,6 +63,7 @@ const DEFAULT_LIGHT_STATE: LightState = {
  * - Turn off all lights at once
  * - Refresh state from devices
  * - Responsive grid layout
+ * - Persistent light linking across page refreshes
  */
 export default function IluminacaoPage() {
   // Device list from backend
@@ -34,7 +74,10 @@ export default function IluminacaoPage() {
   const [lightStates, setLightStates] = useState<Record<string, LightState>>({});
   
   // Track linked lights - maps deviceName to array of linked device names
-  const [linkedLights, setLinkedLights] = useState<Record<string, string[]>>({});
+  // Initialize from localStorage on mount
+  const [linkedLights, setLinkedLights] = useState<Record<string, string[]>>(() => 
+    loadLinkedLightsFromStorage()
+  );
   
   // Loading states for bulk actions
   const [isTurningOffAll, setIsTurningOffAll] = useState(false);
@@ -42,12 +85,44 @@ export default function IluminacaoPage() {
 
   /**
    * Fetches devices from the backend.
+   * Also validates and cleans up linked lights to remove references to non-existent devices.
    */
   const loadDevices = useCallback(async () => {
     setIsLoadingDevices(true);
     try {
       const deviceList = await deviceService.getAllDevices();
       setDevices(deviceList);
+      
+      // Get device names for validation
+      const deviceNames = new Set(deviceList.map(d => d.deviceName));
+      
+      // Validate and clean up linked lights - remove links to devices that no longer exist
+      setLinkedLights(prev => {
+        const cleaned: Record<string, string[]> = {};
+        let hasChanges = false;
+        
+        Object.entries(prev).forEach(([deviceName, linked]) => {
+          // Only keep links if both the device and its linked devices exist
+          if (deviceNames.has(deviceName)) {
+            const validLinks = linked.filter(linkedName => deviceNames.has(linkedName));
+            if (validLinks.length > 0) {
+              cleaned[deviceName] = validLinks;
+            }
+            if (validLinks.length !== linked.length) {
+              hasChanges = true;
+            }
+          } else {
+            hasChanges = true;
+          }
+        });
+        
+        // Save cleaned links if there were changes
+        if (hasChanges) {
+          saveLinkedLightsToStorage(cleaned);
+        }
+        
+        return cleaned;
+      });
       
       // Initialize light states for all devices
       setLightStates(prevStates => {
@@ -199,6 +274,7 @@ export default function IluminacaoPage() {
   /**
    * Toggles linking between two lights.
    * When linking, creates a bidirectional link between the two devices.
+   * Persists changes to localStorage.
    */
   const handleLinkToggle = useCallback((deviceName1: string, deviceName2: string) => {
     setLinkedLights(prev => {
@@ -224,6 +300,9 @@ export default function IluminacaoPage() {
         newLinks[deviceName1] = [...links1, deviceName2];
         newLinks[deviceName2] = [...links2, deviceName1];
       }
+      
+      // Persist to localStorage
+      saveLinkedLightsToStorage(newLinks);
       
       return newLinks;
     });
