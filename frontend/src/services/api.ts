@@ -2,7 +2,7 @@ import axios from 'axios';
 import { API_CONFIG } from '@/config/api';
 
 export const api = axios.create({
-  baseURL: API_CONFIG.baseURL,
+  baseURL: API_CONFIG.baseURL || undefined,
   headers: {
     'Content-Type': 'application/json',
   },

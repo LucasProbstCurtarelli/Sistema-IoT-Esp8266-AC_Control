@@ -97,12 +97,13 @@ public class SecurityConfig {
                     // Disable CSRF for API endpoints (stateless JWT authentication)
                     // CSRF protection is not needed for stateless APIs using JWT tokens
                     // JWT tokens in httpOnly cookies with SameSite=Lax provide sufficient protection
-                    csrf.ignoringRequestMatchers("/api/**");
+                    csrf.ignoringRequestMatchers("/api/**", "/actuator/**");
                 })
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests((requests) -> requests
                         // Public endpoints
                         .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/login").permitAll()
                         .requestMatchers("/api/health/**").permitAll() // Health check endpoints
                         // Admin endpoints require ADMIN role

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { AppSidebar } from "@/components/app-sidebar";
+import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
 import {
     SidebarInset,
     SidebarProvider,
@@ -16,6 +17,7 @@ export default async function DashboardLayout({
     const sidebarState = cookieStore.get("sidebar_state")?.value;
     const defaultOpen = sidebarState ? sidebarState === "true" : true;
     return (
+        <DashboardAuthGate>
         <SidebarProvider defaultOpen={defaultOpen}>
             <AppSidebar />
             <SidebarInset className="flex flex-col overflow-hidden">
@@ -26,8 +28,8 @@ export default async function DashboardLayout({
                             orientation="vertical"
                             className="mr-2 h-4"
                         />
-                        <span className="text-sm text-muted-foreground">
-                            Automação Residencial
+                        <span className="text-sm font-medium text-muted-foreground">
+                            Painel — Automação residencial
                         </span>
                     </div>
                 </header>
@@ -37,5 +39,6 @@ export default async function DashboardLayout({
                 </main>
             </SidebarInset>
         </SidebarProvider>
+        </DashboardAuthGate>
     );
 }

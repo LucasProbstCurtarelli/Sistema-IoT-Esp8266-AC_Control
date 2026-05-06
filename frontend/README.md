@@ -21,7 +21,7 @@ Interface moderna desenvolvida com Next.js para controle de dispositivos IoT.
 
 2. **Configure as variáveis de ambiente**
    ```bash
-   cp .example.env .env.local
+   cp .env.local.example .env.local
    ```
    
    Edite `.env.local`:
