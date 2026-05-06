@@ -1,20 +1,15 @@
+function normalizeApiBase(raw: string | undefined): string {
+    if (raw === undefined || raw.trim() === "") {
+        return "";
+    }
+    return raw.replace(/\/+$/, "");
+}
+
 /**
- * API configuration constants.
- * 
- * These values can be overridden via environment variables.
+ * Empty base URL = same-origin; Next.js rewrites `/api/*` to Spring (see `next.config.ts`).
+ * Set `NEXT_PUBLIC_API_URL` only when the browser must call the API on another host.
  */
 export const API_CONFIG = {
-  /**
-   * Request timeout in milliseconds.
-   * Default: 10000 (10 seconds)
-   * Can be overridden via NEXT_PUBLIC_API_TIMEOUT environment variable.
-   */
-  timeout: parseInt(process.env.NEXT_PUBLIC_API_TIMEOUT || '10000', 10),
-  
-  /**
-   * API base URL.
-   * Default: http://localhost:8080
-   * Can be overridden via NEXT_PUBLIC_API_URL environment variable.
-   */
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
+    timeout: parseInt(process.env.NEXT_PUBLIC_API_TIMEOUT || "10000", 10),
+    baseURL: normalizeApiBase(process.env.NEXT_PUBLIC_API_URL),
 } as const;

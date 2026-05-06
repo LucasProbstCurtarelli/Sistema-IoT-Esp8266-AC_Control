@@ -1,0 +1,6 @@
+# Copy to application-dev.properties (gitignored) for local overrides:
+#   cp src/main/resources/application-dev.properties.example src/main/resources/application-dev.properties
+#
+# Prefer setting SPRING_DATASOURCE_* via root `.env` and scripts/run-backend-local.ps1.
+
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:dev-change-me}

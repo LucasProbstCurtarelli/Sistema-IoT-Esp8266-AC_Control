@@ -30,7 +30,7 @@ export default function RootLayout({
           >
             <AuthProvider>
               {children}
-              <Toaster />
+              <Toaster richColors position="top-right" closeButton />
             </AuthProvider>
           </ThemeProvider>
         </ErrorBoundaryWrapper>
