@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
  * Configuration class for MQTT settings.
  * 
  * Externalizes MQTT configuration to follow Dependency Inversion Principle.
- * Configuration values can be overridden via application.properties.
+ * Configuration values can be overridden via application.yml or environment variables.
  */
 @Configuration
 public class MqttConfig {
