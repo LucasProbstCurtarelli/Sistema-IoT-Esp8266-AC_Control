@@ -4,10 +4,6 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
-/**
- * Mirrors Unifique DashboardShell: blocks dashboard chrome until auth is resolved,
- * then redirects unauthenticated users to login.
- */
 export function DashboardAuthGate({ children }: { children: React.ReactNode }) {
     const { isAuthenticated, isLoading } = useAuth();
     const router = useRouter();
@@ -20,16 +16,16 @@ export function DashboardAuthGate({ children }: { children: React.ReactNode }) {
 
     if (isLoading) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-                Carregando…
+            <div className="flex min-h-screen items-center justify-center bg-background px-5 text-muted-foreground">
+                A abrir a casa.
             </div>
         );
     }
 
     if (!isAuthenticated) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-                Redirecionando…
+            <div className="flex min-h-screen items-center justify-center bg-background px-5 text-muted-foreground">
+                É preciso entrar.
             </div>
         );
     }

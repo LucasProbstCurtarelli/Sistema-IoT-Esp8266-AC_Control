@@ -1,17 +1,10 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Lightbulb, Power, Circle, Loader2, Link, Link2Off } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { lightingService, type LightCommandRequest } from "@/services/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -30,7 +23,6 @@ interface LightCardProps {
   initialState?: LightState;
   onStateChange?: (deviceName: string, state: LightState) => void;
   linkedDevices?: string[];
-  isLinked?: boolean;
   availableDevices?: Array<{ deviceName: string; displayName: string }>;
   onLinkToggle?: (deviceName1: string, deviceName2: string) => void;
   onLinkedDeviceStateChange?: (deviceName: string, state: LightState) => void;
@@ -54,7 +46,6 @@ function LightCardComponent({
   initialState = { state: false, brightness: 100, color: "#FFFFFF" },
   onStateChange,
   linkedDevices = [],
-  isLinked = false,
   availableDevices = [],
   onLinkToggle,
   onLinkedDeviceStateChange,
@@ -175,13 +166,13 @@ function LightCardComponent({
         if (axiosError.response?.data?.message) {
           errorMessage = axiosError.response.data.message;
         } else if (axiosError.request) {
-          errorMessage = "Servidor não está respondendo. Verifique se o backend está rodando.";
+          errorMessage = "A casa não respondeu. Tenta outra vez.";
         } else if (axiosError.message) {
           errorMessage = axiosError.message;
         }
       }
       
-      toast.error("Erro ao controlar lâmpada", {
+      toast.error("Não deu para mudar a lâmpada.", {
         description: errorMessage,
         duration: 5000,
       });
@@ -330,219 +321,155 @@ function LightCardComponent({
   const showControls = lightState.state;
 
   return (
-    <Card className={cn(
-      "transition-all duration-300",
-      lightState.state && "ring-2 ring-primary/20"
-    )}>
-      <CardHeader>
+    <section className="flex flex-col gap-5 border-t border-border py-8 first:border-t-0 first:pt-0">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold leading-tight">{displayName}</h2>
+          {location ? <p className="mt-1 text-muted-foreground">{location}</p> : null}
+        </div>
+        {isLoading && (
+          <Loader2 className="mt-2 h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+        )}
+      </div>
+
+      <div className="flex items-center gap-4">
+        <span
+          className="h-16 w-16 shrink-0 rounded-full border border-border"
+          style={{
+            background: lightState.state ? lightState.color : "transparent",
+            boxShadow: lightState.state ? `0 0 22px ${lightState.color}` : undefined,
+          }}
+          aria-hidden
+        />
+        <p className="text-muted-foreground">
+          {lightState.state ? `Acesa, brilho ${lightState.brightness}%` : "Apagada"}
+        </p>
+      </div>
+
+      <Button
+        onClick={toggleLight}
+        disabled={isToggling}
+        className="h-12 w-full text-base"
+        size="lg"
+        variant={lightState.state ? "secondary" : "default"}
+        type="button"
+      >
+        {isToggling ? "A enviar" : (lightState.state ? "Apagar" : "Acender")}
+      </Button>
+
+      <div className={cn("space-y-3", !showControls && "opacity-50")}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Lightbulb className={cn(
-              "h-5 w-5 transition-colors",
-              lightState.state ? "text-yellow-500" : "text-muted-foreground"
-            )} />
-            <CardTitle>{displayName}</CardTitle>
-          </div>
-          <div className="flex items-center gap-2">
-            {isLoading && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-            {onLinkToggle && availableDevices.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "h-8 w-8",
-                      isLinked && "text-primary"
-                    )}
-                    title={isLinked ? "Desvincular lâmpadas" : "Vincular lâmpadas"}
-                  >
-                    {isLinked ? (
-                      <Link className="h-4 w-4" />
-                    ) : (
-                      <Link2Off className="h-4 w-4" />
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {availableDevices.map((device) => {
-                    const isCurrentlyLinked = linkedDevices.includes(device.deviceName);
-                    return (
-                      <DropdownMenuItem
-                        key={device.deviceName}
-                        onClick={() => onLinkToggle(deviceName, device.deviceName)}
-                        className="flex items-center gap-2"
-                      >
-                        {isCurrentlyLinked ? (
-                          <>
-                            <Link className="h-4 w-4 text-primary" />
-                            <span>Desvincular de {device.displayName}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Link2Off className="h-4 w-4" />
-                            <span>Vincular com {device.displayName}</span>
-                          </>
-                        )}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </div>
-        <CardDescription>{location}</CardDescription>
-      </CardHeader>
-      
-      <CardContent className="space-y-4">
-        {/* Light indicator */}
-        <div className="text-center">
-          <div className="flex justify-center">
-            <Circle 
-              className={cn(
-                "h-12 w-12 transition-all duration-300",
-                lightState.state 
-                  ? "fill-current" 
-                  : "text-muted-foreground"
-              )}
-              style={{
-                color: lightState.state ? lightState.color : undefined,
-                filter: lightState.state 
-                  ? `drop-shadow(0 0 ${lightState.brightness / 10}px ${lightState.color})`
-                  : undefined,
-              }}
-            />
-          </div>
-          <div className="text-sm text-muted-foreground mt-2">
-            {lightState.state ? "Ligada" : "Desligada"}
-            {lightState.state && ` • ${lightState.brightness}%`}
-          </div>
-        </div>
-
-        {/* Power button */}
-        <Button
-          onClick={toggleLight}
-          disabled={isToggling}
-          className="w-full"
-          size="lg"
-          variant={lightState.state ? "secondary" : "default"}
-          type="button"
-        >
-          {isToggling ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Power className="mr-2 h-4 w-4" />
-          )}
-          {isToggling ? "Processando..." : (lightState.state ? "Desligar" : "Ligar")}
-        </Button>
-
-        {/* Brightness control - always visible, disabled when off */}
-        <div className={cn("space-y-2 transition-opacity", !showControls && "opacity-50")}>
-          <div className="flex items-center justify-between">
-            <Label htmlFor={`brightness-${deviceName}`} className="flex items-center gap-2">
-              Brilho
-              {isSendingBrightness && (
-                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-              )}
-            </Label>
-            <span className="text-sm text-muted-foreground">
-              {lightState.brightness}%
-            </span>
-          </div>
-          <Slider
-            id={`brightness-${deviceName}`}
-            min={0}
-            max={100}
-            step={1}
-            value={[lightState.brightness]}
-            onValueChange={handleBrightnessChange}
-            onValueCommit={handleBrightnessCommit}
-            disabled={!showControls || isToggling}
-          />
-        </div>
-
-        {/* Color control - always visible, disabled when off */}
-        <div className={cn("space-y-3 transition-opacity", !showControls && "opacity-50")}>
-          <Label className="flex items-center gap-2">
-            Cor
-            {isSendingColor && (
-              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          <Label htmlFor={`brightness-${deviceName}`} className="flex items-center gap-2">
+            Brilho
+            {isSendingBrightness && (
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-hidden />
             )}
           </Label>
-          
-          {/* Color picker */}
-          <div className="flex items-center gap-3">
-            <input
-              id={`color-${deviceName}`}
-              type="color"
-              value={lightState.color}
-              onChange={(e) => {
-                // Update UI while dragging
-                handleColorChange(e.target.value);
-                
-                // Clear any pending commit timeout
-                if (colorCommitTimeoutRef.current) {
-                  clearTimeout(colorCommitTimeoutRef.current);
-                }
-                
-                // Schedule commit after a short delay (debounce)
-                // This will be cancelled if another change happens quickly
-                colorCommitTimeoutRef.current = setTimeout(() => {
-                  if (!colorCommitInProgress.current) {
-                    handleColorCommit(e.target.value);
-                  }
-                }, 150);
-              }}
-              onMouseUp={(e) => {
-                // Clear debounce timeout and commit immediately on mouse release
-                if (colorCommitTimeoutRef.current) {
-                  clearTimeout(colorCommitTimeoutRef.current);
-                  colorCommitTimeoutRef.current = null;
-                }
-                const target = e.target as HTMLInputElement;
-                if (target.value && !colorCommitInProgress.current) {
-                  handleColorCommit(target.value);
-                }
-              }}
-              onPointerUp={(e) => {
-                // Clear debounce timeout and commit immediately on pointer release
-                if (colorCommitTimeoutRef.current) {
-                  clearTimeout(colorCommitTimeoutRef.current);
-                  colorCommitTimeoutRef.current = null;
-                }
-                const target = e.target as HTMLInputElement;
-                if (target.value && !colorCommitInProgress.current) {
-                  handleColorCommit(target.value);
-                }
-              }}
-              onTouchEnd={(e) => {
-                // Clear debounce timeout and commit immediately on touch end
-                if (colorCommitTimeoutRef.current) {
-                  clearTimeout(colorCommitTimeoutRef.current);
-                  colorCommitTimeoutRef.current = null;
-                }
-                const target = e.target as HTMLInputElement;
-                if (target.value && !colorCommitInProgress.current) {
-                  handleColorCommit(target.value);
-                }
-              }}
-              disabled={!showControls || isToggling}
-              className={cn(
-                "h-10 w-20 cursor-pointer rounded-md border border-input bg-background transition-all",
-                "hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                (!showControls || isToggling) && "cursor-not-allowed opacity-50"
-              )}
-            />
-            <span className="text-sm text-muted-foreground font-mono">
-              {lightState.color.toUpperCase()}
-            </span>
-          </div>
+          <span className="text-sm text-muted-foreground">
+            {lightState.brightness}%
+          </span>
         </div>
-      </CardContent>
-    </Card>
+        <Slider
+          id={`brightness-${deviceName}`}
+          min={0}
+          max={100}
+          step={1}
+          value={[lightState.brightness]}
+          onValueChange={handleBrightnessChange}
+          onValueCommit={handleBrightnessCommit}
+          disabled={!showControls || isToggling}
+        />
+      </div>
+
+      <div className={cn("space-y-3", !showControls && "opacity-50")}>
+        <Label htmlFor={`color-${deviceName}`} className="flex items-center gap-2">
+          Cor
+          {isSendingColor && (
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-hidden />
+          )}
+        </Label>
+        <div className="flex items-center gap-3">
+          <input
+            id={`color-${deviceName}`}
+            type="color"
+            value={lightState.color}
+            onChange={(e) => {
+              handleColorChange(e.target.value);
+
+              if (colorCommitTimeoutRef.current) {
+                clearTimeout(colorCommitTimeoutRef.current);
+              }
+
+              colorCommitTimeoutRef.current = setTimeout(() => {
+                if (!colorCommitInProgress.current) {
+                  handleColorCommit(e.target.value);
+                }
+              }, 150);
+            }}
+            onMouseUp={(e) => {
+              if (colorCommitTimeoutRef.current) {
+                clearTimeout(colorCommitTimeoutRef.current);
+                colorCommitTimeoutRef.current = null;
+              }
+              const target = e.target as HTMLInputElement;
+              if (target.value && !colorCommitInProgress.current) {
+                handleColorCommit(target.value);
+              }
+            }}
+            onPointerUp={(e) => {
+              if (colorCommitTimeoutRef.current) {
+                clearTimeout(colorCommitTimeoutRef.current);
+                colorCommitTimeoutRef.current = null;
+              }
+              const target = e.target as HTMLInputElement;
+              if (target.value && !colorCommitInProgress.current) {
+                handleColorCommit(target.value);
+              }
+            }}
+            onTouchEnd={(e) => {
+              if (colorCommitTimeoutRef.current) {
+                clearTimeout(colorCommitTimeoutRef.current);
+                colorCommitTimeoutRef.current = null;
+              }
+              const target = e.target as HTMLInputElement;
+              if (target.value && !colorCommitInProgress.current) {
+                handleColorCommit(target.value);
+              }
+            }}
+            disabled={!showControls || isToggling}
+            aria-label={`Cor de ${displayName}`}
+            className={cn(
+              "h-12 w-16 cursor-pointer rounded-md border border-input bg-background",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              (!showControls || isToggling) && "cursor-not-allowed opacity-50"
+            )}
+          />
+          <span className="text-sm text-muted-foreground">
+            {lightState.state ? "Cor desta lâmpada" : "A cor vale quando acender"}
+          </span>
+        </div>
+      </div>
+
+      {onLinkToggle && availableDevices.length > 0 && (
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          {availableDevices.map((device) => {
+            const isCurrentlyLinked = linkedDevices.includes(device.deviceName);
+            return (
+              <button
+                key={device.deviceName}
+                type="button"
+                onClick={() => onLinkToggle(deviceName, device.deviceName)}
+                className="min-h-11 w-fit text-left underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {isCurrentlyLinked
+                  ? `Separar de ${device.displayName}`
+                  : `Acender junto com ${device.displayName}`}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

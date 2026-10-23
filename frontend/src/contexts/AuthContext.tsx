@@ -73,9 +73,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             setUser(null);
             router.push("/login");
-            toast.success("Logout realizado com sucesso");
-        } catch (error) {
-            toast.error("Erro ao fazer logout");
+            toast.success("Saiu.");
+        } catch {
+            toast.error("Não deu para sair.");
         }
     }, [router]);
 

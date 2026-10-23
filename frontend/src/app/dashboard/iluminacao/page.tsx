@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { PowerOff, RefreshCw, Loader2 } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { LightCard, type LightState } from "@/components/light-card";
 import { lightingService, deviceService } from "@/services/api";
@@ -9,75 +8,51 @@ import type { DeviceResponse } from "@/services/api";
 import { toast } from "sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-// Default state for lights
 const DEFAULT_LIGHT_STATE: LightState = {
   state: false,
   brightness: 100,
   color: "#FFFFFF",
 };
 
-// LocalStorage key for persisting linked lights
-const LINKED_LIGHTS_STORAGE_KEY = "automacao_residencial_linked_lights";
+function toggleLinkMap(
+  links: Record<string, string[]>,
+  deviceName1: string,
+  deviceName2: string,
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {
+    ...links,
+    [deviceName1]: [...(links[deviceName1] ?? [])],
+    [deviceName2]: [...(links[deviceName2] ?? [])],
+  };
+  const isLinked = next[deviceName1].includes(deviceName2) || next[deviceName2].includes(deviceName1);
 
-/**
- * Loads linked lights from localStorage.
- * Returns an empty object if no data exists or if parsing fails.
- */
-function loadLinkedLightsFromStorage(): Record<string, string[]> {
-  if (typeof window === "undefined") return {};
-  
-  try {
-    const stored = localStorage.getItem(LINKED_LIGHTS_STORAGE_KEY);
-    if (!stored) return {};
-    
-    const parsed = JSON.parse(stored);
-    // Validate that it's an object with string keys and string array values
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed;
-    }
-    return {};
-  } catch (error) {
-    console.warn("[IluminacaoPage] Failed to load linked lights from storage:", error);
-    return {};
+  if (isLinked) {
+    next[deviceName1] = next[deviceName1].filter((name) => name !== deviceName2);
+    next[deviceName2] = next[deviceName2].filter((name) => name !== deviceName1);
+  } else {
+    next[deviceName1] = [...next[deviceName1], deviceName2];
+    next[deviceName2] = [...next[deviceName2], deviceName1];
   }
+
+  if (next[deviceName1].length === 0) delete next[deviceName1];
+  if (next[deviceName2].length === 0) delete next[deviceName2];
+  return next;
 }
 
-/**
- * Saves linked lights to localStorage.
- */
-function saveLinkedLightsToStorage(linkedLights: Record<string, string[]>): void {
-  if (typeof window === "undefined") return;
-  
-  try {
-    localStorage.setItem(LINKED_LIGHTS_STORAGE_KEY, JSON.stringify(linkedLights));
-  } catch (error) {
-    console.warn("[IluminacaoPage] Failed to save linked lights to storage:", error);
-  }
-}
-
-/**
- * Iluminação (Lighting) Dashboard Page
- * 
- * Features:
- * - Control multiple smart bulbs
- * - Turn off all lights at once
- * - Refresh state from devices
- * - Responsive grid layout
- * - Persistent light linking across page refreshes
- */
 export default function IluminacaoPage() {
   // Device list from backend
   const [devices, setDevices] = useState<DeviceResponse[]>([]);
   const [isLoadingDevices, setIsLoadingDevices] = useState(true);
+  const [devicesFailed, setDevicesFailed] = useState(false);
   
   // Track states for all lights
   const [lightStates, setLightStates] = useState<Record<string, LightState>>({});
   
-  // Track linked lights - maps deviceName to array of linked device names
-  // Initialize from localStorage on mount
-  const [linkedLights, setLinkedLights] = useState<Record<string, string[]>>(() => 
-    loadLinkedLightsFromStorage()
-  );
+  const [linkedLights, setLinkedLights] = useState<Record<string, string[]>>({});
+  const [linksAttempt, setLinksAttempt] = useState(0);
+  const [linksLoading, setLinksLoading] = useState(true);
+  const [linksFailed, setLinksFailed] = useState(false);
+  const linksRef = useRef<Record<string, string[]>>({});
   
   // Loading states for bulk actions
   const [isTurningOffAll, setIsTurningOffAll] = useState(false);
@@ -89,41 +64,11 @@ export default function IluminacaoPage() {
    */
   const loadDevices = useCallback(async () => {
     setIsLoadingDevices(true);
+    setDevicesFailed(false);
     try {
       const deviceList = await deviceService.getAllDevices();
       setDevices(deviceList);
-      
-      // Get device names for validation
-      const deviceNames = new Set(deviceList.map(d => d.deviceName));
-      
-      // Validate and clean up linked lights - remove links to devices that no longer exist
-      setLinkedLights(prev => {
-        const cleaned: Record<string, string[]> = {};
-        let hasChanges = false;
-        
-        Object.entries(prev).forEach(([deviceName, linked]) => {
-          // Only keep links if both the device and its linked devices exist
-          if (deviceNames.has(deviceName)) {
-            const validLinks = linked.filter(linkedName => deviceNames.has(linkedName));
-            if (validLinks.length > 0) {
-              cleaned[deviceName] = validLinks;
-            }
-            if (validLinks.length !== linked.length) {
-              hasChanges = true;
-            }
-          } else {
-            hasChanges = true;
-          }
-        });
-        
-        // Save cleaned links if there were changes
-        if (hasChanges) {
-          saveLinkedLightsToStorage(cleaned);
-        }
-        
-        return cleaned;
-      });
-      
+
       // Initialize light states for all devices
       setLightStates(prevStates => {
         const newStates: Record<string, LightState> = { ...prevStates };
@@ -136,9 +81,8 @@ export default function IluminacaoPage() {
       });
     } catch (error) {
       console.error("[IluminacaoPage] Error loading devices:", error);
-      toast.error("Erro ao carregar dispositivos", {
-        description: "Não foi possível obter a lista de dispositivos.",
-      });
+      setDevicesFailed(true);
+      toast.error("Não deu para ler as lâmpadas.");
     } finally {
       setIsLoadingDevices(false);
     }
@@ -182,9 +126,7 @@ export default function IluminacaoPage() {
       });
     } catch (error) {
       console.error("[IluminacaoPage] Error refreshing states:", error);
-      toast.error("Erro ao atualizar estados", {
-        description: "Não foi possível obter o estado atual das lâmpadas.",
-      });
+      toast.error("Não deu para atualizar as lâmpadas.");
     } finally {
       setIsRefreshing(false);
     }
@@ -197,8 +139,8 @@ export default function IluminacaoPage() {
     // Check if any light is on
     const anyLightOn = Object.values(lightStates).some(state => state.state);
     
-    if (!anyLightOn) {
-      toast.info("Todas as lâmpadas já estão desligadas");
+      if (!anyLightOn) {
+      toast.info("Todas já estão apagadas.");
       return;
     }
     
@@ -206,25 +148,21 @@ export default function IluminacaoPage() {
     
     try {
       // Send off command to all lights that are on
+      const targets = devices.filter(device => lightStates[device.deviceName]?.state);
       const results = await Promise.allSettled(
-        devices.filter(device => lightStates[device.deviceName]?.state)
-          .map(device => lightingService.sendCommand(device.deviceName, { state: false }))
+        targets.map(device => lightingService.sendCommand(device.deviceName, { state: false }))
       );
       
-      // Check for failures
       const failures = results.filter(r => r.status === 'rejected');
       
       if (failures.length > 0) {
-        toast.error("Erro ao desligar algumas lâmpadas", {
-          description: `${failures.length} de ${results.length} comandos falharam.`,
-        });
+        toast.error("Não deu para apagar todas. Algumas continuam acesas.");
       }
       
-      // Update local state for successful commands
       setLightStates(prev => {
         const newStates = { ...prev };
-        devices.forEach((device, index) => {
-          if (prev[device.deviceName]?.state && results[index]?.status === 'fulfilled') {
+        targets.forEach((device, index) => {
+          if (results[index]?.status === 'fulfilled') {
             newStates[device.deviceName] = { ...prev[device.deviceName], state: false };
           }
         });
@@ -233,9 +171,7 @@ export default function IluminacaoPage() {
       
     } catch (error) {
       console.error("[IluminacaoPage] Error turning off all lights:", error);
-      toast.error("Erro ao desligar lâmpadas", {
-        description: "Não foi possível desligar todas as lâmpadas.",
-      });
+      toast.error("Não deu para apagar as lâmpadas.");
     } finally {
       setIsTurningOffAll(false);
     }
@@ -271,40 +207,18 @@ export default function IluminacaoPage() {
     });
   }, []);
 
-  /**
-   * Toggles linking between two lights.
-   * When linking, creates a bidirectional link between the two devices.
-   * Persists changes to localStorage.
-   */
   const handleLinkToggle = useCallback((deviceName1: string, deviceName2: string) => {
-    setLinkedLights(prev => {
-      const newLinks = { ...prev };
-      
-      // Get current links for both devices
-      const links1 = newLinks[deviceName1] || [];
-      const links2 = newLinks[deviceName2] || [];
-      
-      // Check if they're already linked
-      const isLinked = links1.includes(deviceName2) || links2.includes(deviceName1);
-      
-      if (isLinked) {
-        // Unlink: remove from both arrays
-        newLinks[deviceName1] = links1.filter(name => name !== deviceName2);
-        newLinks[deviceName2] = links2.filter(name => name !== deviceName1);
-        
-        // Clean up empty arrays
-        if (newLinks[deviceName1].length === 0) delete newLinks[deviceName1];
-        if (newLinks[deviceName2].length === 0) delete newLinks[deviceName2];
-      } else {
-        // Link: add to both arrays
-        newLinks[deviceName1] = [...links1, deviceName2];
-        newLinks[deviceName2] = [...links2, deviceName1];
+    const previous = linksRef.current;
+    const next = toggleLinkMap(previous, deviceName1, deviceName2);
+    linksRef.current = next;
+    setLinkedLights(next);
+
+    void lightingService.saveLinks(next).catch(() => {
+      if (linksRef.current === next) {
+        linksRef.current = previous;
+        setLinkedLights(previous);
       }
-      
-      // Persist to localStorage
-      saveLinkedLightsToStorage(newLinks);
-      
-      return newLinks;
+      toast.error("Não deu para guardar o vínculo.");
     });
   }, []);
 
@@ -315,18 +229,34 @@ export default function IluminacaoPage() {
     return linkedLights[deviceName] || [];
   }, [linkedLights]);
 
-  /**
-   * Checks if a device is linked to any other device.
-   */
-  const isDeviceLinked = useCallback((deviceName: string): boolean => {
-    const links = linkedLights[deviceName];
-    return links !== undefined && links.length > 0;
-  }, [linkedLights]);
-
   // Load devices on mount
   useEffect(() => {
     loadDevices();
   }, [loadDevices]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLinksLoading(true);
+
+    lightingService.getLinks().then(
+      (links) => {
+        if (cancelled) return;
+        linksRef.current = links;
+        setLinkedLights(links);
+        setLinksFailed(false);
+      },
+      () => {
+        if (cancelled) return;
+        setLinksFailed(true);
+      }
+    ).finally(() => {
+      if (!cancelled) setLinksLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linksAttempt]);
 
   // Fetch light states after devices are loaded
   useEffect(() => {
@@ -339,81 +269,82 @@ export default function IluminacaoPage() {
   const lightsOn = Object.values(lightStates).filter(s => s.state).length;
   const totalLights = devices.length;
 
+  const summary = isLoadingDevices
+    ? "A ler as lâmpadas."
+    : devicesFailed
+      ? "Não deu para ler as lâmpadas."
+      : totalLights === 0
+        ? "Nenhuma lâmpada nesta casa."
+        : lightsOn === 0
+        ? "Todas apagadas."
+        : lightsOn === totalLights
+          ? "Todas acesas."
+          : `${lightsOn} de ${totalLights} acesas.`;
+
   return (
     <ErrorBoundary>
-      <div className="flex flex-col gap-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Iluminação</h1>
-          <p className="text-muted-foreground mt-1">
-            Controle das lâmpadas inteligentes • {lightsOn}/{totalLights} ligadas
-          </p>
+          <h1 className="text-3xl font-bold leading-tight">Luzes</h1>
+          <p className="mt-2 text-muted-foreground">{summary}</p>
         </div>
-        
-        {/* Bulk actions */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshLightStates}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            <span className="ml-2 hidden sm:inline">Atualizar</span>
-          </Button>
-          
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={turnOffAllLights}
-            disabled={isTurningOffAll || lightsOn === 0}
-          >
-            {isTurningOffAll ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PowerOff className="h-4 w-4" />
-            )}
-            <span className="ml-2 hidden sm:inline">Desligar Todas</span>
-          </Button>
-        </div>
-      </div>
 
-      {/* Light cards grid */}
-      {isLoadingDevices ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      ) : devices.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          Nenhum dispositivo encontrado.
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {devices.map((device) => (
-            <LightCard
-              key={device.deviceName}
-              deviceName={device.deviceName}
-              displayName={device.displayName}
-              location={device.location}
-              initialState={lightStates[device.deviceName]}
-              onStateChange={handleLightStateChange}
-              linkedDevices={getLinkedDevices(device.deviceName)}
-              isLinked={isDeviceLinked(device.deviceName)}
-              availableDevices={devices.filter(d => d.deviceName !== device.deviceName).map(d => ({
-                deviceName: d.deviceName,
-                displayName: d.displayName,
-              }))}
-              onLinkToggle={handleLinkToggle}
-              onLinkedDeviceStateChange={handleLinkedDeviceStateChange}
-            />
-          ))}
-        </div>
-      )}
+        {linksFailed && (
+          <div className="text-muted-foreground">
+            <p>Não deu para ler quais lâmpadas acendem juntas.</p>
+            <button
+              type="button"
+              onClick={() => setLinksAttempt((attempt) => attempt + 1)}
+              disabled={linksLoading}
+              className="mt-2 min-h-11 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              {linksLoading ? "A tentar" : "Tentar de novo"}
+            </button>
+          </div>
+        )}
+
+        {!isLoadingDevices && devices.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <Button
+              variant="outline"
+              onClick={refreshLightStates}
+              disabled={isRefreshing}
+              className="h-12"
+            >
+              {isRefreshing ? "A atualizar" : "Atualizar"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={turnOffAllLights}
+              disabled={isTurningOffAll || lightsOn === 0}
+              className="h-12"
+            >
+              {isTurningOffAll ? "A apagar" : "Apagar as acesas"}
+            </Button>
+          </div>
+        )}
+
+        {!isLoadingDevices && devices.length > 0 && (
+          <div className="flex flex-col">
+            {devices.map((device) => (
+              <LightCard
+                key={device.deviceName}
+                deviceName={device.deviceName}
+                displayName={device.displayName}
+                location={device.location}
+                initialState={lightStates[device.deviceName]}
+                onStateChange={handleLightStateChange}
+                linkedDevices={getLinkedDevices(device.deviceName)}
+                availableDevices={devices.filter(d => d.deviceName !== device.deviceName).map(d => ({
+                  deviceName: d.deviceName,
+                  displayName: d.displayName,
+                }))}
+                onLinkToggle={linksLoading ? undefined : handleLinkToggle}
+                onLinkedDeviceStateChange={handleLinkedDeviceStateChange}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

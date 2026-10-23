@@ -1,16 +1,21 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Atkinson_Hyperlegible } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 
-const inter = Inter({ subsets: ["latin"] });
+const atkinson = Atkinson_Hyperlegible({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-atkinson",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Automação Residencial",
-  description: "Sistema de controle para automação residencial",
+  title: "Casa",
+  description: "Luzes e ar desta casa.",
 };
 
 export default function RootLayout({
@@ -19,18 +24,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
-      <body className={inter.className} suppressHydrationWarning>
+    <html lang="pt-BR" className={atkinson.variable} suppressHydrationWarning>
+      <body className={`${atkinson.className} antialiased`} suppressHydrationWarning>
         <ErrorBoundaryWrapper>
           <ThemeProvider
             attribute="class"
-            defaultTheme="system"
-            enableSystem
+            defaultTheme="dark"
+            enableSystem={false}
             disableTransitionOnChange
           >
             <AuthProvider>
               {children}
-              <Toaster richColors position="top-right" closeButton />
+              <Toaster position="top-center" closeButton />
             </AuthProvider>
           </ThemeProvider>
         </ErrorBoundaryWrapper>
