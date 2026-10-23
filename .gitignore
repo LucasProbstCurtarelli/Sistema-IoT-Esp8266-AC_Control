@@ -45,6 +45,12 @@ yarn-error.log*
 node-red/.node-red/
 node-red/flows_cred.json
 node-red/lib/flows/
+node-red/.config.runtime.json
+node-red/.config.nodes.json
+node-red/.config.users.json
+.config.runtime.json
+.config.nodes.json
+.config.users.json
 
 # OS
 .DS_Store
