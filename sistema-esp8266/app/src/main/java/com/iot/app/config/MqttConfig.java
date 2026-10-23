@@ -20,6 +20,12 @@ public class MqttConfig {
     
     @Value("${mqtt.qos:1}")
     private int qos;
+
+    @Value("${mqtt.username:}")
+    private String username;
+
+    @Value("${mqtt.password:}")
+    private String password;
     
     public String getBrokerUrl() {
         return brokerUrl;
@@ -31,5 +37,13 @@ public class MqttConfig {
     
     public int getQos() {
         return qos;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public String getPassword() {
+        return password;
     }
 }
