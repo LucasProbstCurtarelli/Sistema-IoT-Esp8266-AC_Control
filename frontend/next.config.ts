@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDir = path.dirname(fileURLToPath(import.meta.url));
 
 const backendProxy =
     process.env.BACKEND_PROXY_TARGET?.replace(/\/$/, "") || "http://127.0.0.1:8080";
@@ -8,7 +11,7 @@ const nextConfig: NextConfig = {
     output: "standalone",
     reactStrictMode: true,
     turbopack: {
-        root: path.join(process.cwd()),
+        root: appDir,
     },
     async rewrites() {
         return {
