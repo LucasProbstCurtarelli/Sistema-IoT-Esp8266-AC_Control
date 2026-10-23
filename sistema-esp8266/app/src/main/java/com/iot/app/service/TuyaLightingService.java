@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,6 +71,7 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
     
     // Map para armazenar futures de consulta de estado (correlationId -> CompletableFuture)
     private final ConcurrentHashMap<String, CompletableFuture<LightStatusResponse>> pendingQueries = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, LightStatusResponse> latestByDevice = new ConcurrentHashMap<>();
 
     public TuyaLightingService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -324,12 +326,13 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         try {
             String payload = new String(message.getPayload());
             JsonNode jsonNode = objectMapper.readTree(payload);
-            
-            String correlationId = jsonNode.has("correlationId") ? 
-                jsonNode.get("correlationId").asText() : null;
+            rememberState(topic, jsonNode);
+
+            String correlationId = jsonNode.hasNonNull("correlationId")
+                ? jsonNode.get("correlationId").asText() : null;
             
             if (correlationId == null) {
-                logger.debug("Received state message without correlation ID, ignoring");
+                logger.debug("Received state message without correlation ID; cached device state only");
                 return;
             }
             
@@ -371,6 +374,41 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
         }
     }
     
+    /**
+     * Last state observed on {@code tuya/{device}/state}, including messages that were not a query reply.
+     */
+    public Optional<LightStatusResponse> latestKnownState(String deviceName) {
+        if (deviceName == null || deviceName.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(latestByDevice.get(deviceName));
+    }
+
+    private void rememberState(String topic, JsonNode jsonNode) {
+        if (jsonNode == null || jsonNode.has("error")) {
+            return;
+        }
+        String[] parts = topic.split("/");
+        if (parts.length < 2 || parts[1].isBlank()) {
+            return;
+        }
+        if (!jsonNode.has("state") && !jsonNode.has("color") && !jsonNode.has("brightness")) {
+            return;
+        }
+        LightStatusResponse response = LightStatusResponse.builder()
+                .success(true)
+                .device(parts[1])
+                .state(jsonNode.has("state") && jsonNode.get("state").isBoolean()
+                        ? jsonNode.get("state").asBoolean() : null)
+                .brightness(jsonNode.has("brightness") && jsonNode.get("brightness").isNumber()
+                        ? jsonNode.get("brightness").asInt() : null)
+                .color(jsonNode.has("color") && jsonNode.get("color").isTextual()
+                        ? jsonNode.get("color").asText() : null)
+                .lastUpdated(Instant.now())
+                .build();
+        latestByDevice.put(parts[1], response);
+    }
+
     /**
      * Converts a hexadecimal color string (#RRGGBB) to Tuya color format (HHHHSSSSVVVV).
      * 

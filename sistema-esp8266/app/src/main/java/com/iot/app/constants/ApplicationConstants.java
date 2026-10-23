@@ -78,6 +78,9 @@ public final class ApplicationConstants {
     
     /** MQTT state topic pattern (wildcard) */
     public static final String TUYA_STATE_TOPIC_PATTERN = "tuya/+/state";
+
+    /** Presence facts from the entrance ESP. Not an AC or lamp command. */
+    public static final String ENTRANCE_PRESENCE_TOPIC = "/iot/entrada/presenca";
     
     // ==================== Response Messages ====================
     

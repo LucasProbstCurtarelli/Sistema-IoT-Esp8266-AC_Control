@@ -3,6 +3,7 @@ package com.iot.app.controller;
 import com.iot.app.constants.ApplicationConstants;
 import com.iot.app.dto.LightCommandRequest;
 import com.iot.app.dto.LightStatusResponse;
+import com.iot.app.service.EntranceSettingsService;
 import com.iot.app.service.TuyaLightingService;
 import com.iot.app.util.ErrorResponseBuilder;
 import com.iot.app.util.SuccessResponseBuilder;
@@ -36,9 +37,13 @@ public class LightingController {
     private static final Logger logger = LoggerFactory.getLogger(LightingController.class);
     
     private final TuyaLightingService lightingService;
+    private final EntranceSettingsService entranceSettingsService;
 
-    public LightingController(TuyaLightingService lightingService) {
+    public LightingController(
+            TuyaLightingService lightingService,
+            EntranceSettingsService entranceSettingsService) {
         this.lightingService = lightingService;
+        this.entranceSettingsService = entranceSettingsService;
     }
 
     /**
@@ -69,6 +74,7 @@ public class LightingController {
                     deviceName, request.getState(), request.getBrightness(), request.getColor());
             
             lightingService.sendLightCommand(deviceName, request);
+            rememberResidentColor(request);
 
             Map<String, Object> additionalFields = new HashMap<>();
             additionalFields.put("device", deviceName);
@@ -104,6 +110,17 @@ public class LightingController {
                 ApplicationConstants.UNEXPECTED_ERROR + " while controlling the device.", 
                 500
             );
+        }
+    }
+
+    private void rememberResidentColor(LightCommandRequest request) {
+        if (request.getColor() == null) {
+            return;
+        }
+        try {
+            entranceSettingsService.rememberManualColor(request.getColor(), request.getBrightness());
+        } catch (RuntimeException ex) {
+            logger.warn("Could not remember manual lamp color: {}", ex.getMessage());
         }
     }
     
