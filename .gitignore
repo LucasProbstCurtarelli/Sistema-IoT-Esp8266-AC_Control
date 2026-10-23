@@ -67,6 +67,12 @@ Thumbs.db
 *.swo
 *~
 
+# Spec Kit vazio, inicializado fora do orquestrador.
+# A cópia em uso está em sistema-esp8266/.specify.
+/frontend/.cursor/
+/frontend/.specify/
+/frontend/specs/
+
 # IDE
 .vscode/
 .idea/
