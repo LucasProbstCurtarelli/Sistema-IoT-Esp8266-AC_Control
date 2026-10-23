@@ -226,7 +226,58 @@ export const deviceService = {
   },
 };
 
+function asDeviceNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+/**
+ * Accepts `{ links: { lampada_1: ["lampada_2"] } }`.
+ * A one-way pair is mirrored so both lamps show the same vínculo.
+ * Throws when the body is not that contract, including a 200 with the wrong shape.
+ */
+export function parseLightLinks(data: unknown): Record<string, string[]> {
+  if (!data || typeof data !== "object" || Array.isArray(data) || !("links" in data)) {
+    throw new Error("Resposta de vínculos inválida");
+  }
+
+  const links = (data as { links: unknown }).links;
+  if (!links || typeof links !== "object" || Array.isArray(links)) {
+    throw new Error("Resposta de vínculos inválida");
+  }
+
+  const parsed: Record<string, string[]> = {};
+  for (const [name, value] of Object.entries(links)) {
+    const targets = asDeviceNames(value).filter((target) => target !== name);
+    if (name.length > 0 && targets.length > 0) parsed[name] = targets;
+  }
+
+  const symmetric: Record<string, string[]> = {};
+  const add = (from: string, to: string) => {
+    const list = symmetric[from] ?? [];
+    if (!list.includes(to)) symmetric[from] = [...list, to];
+  };
+
+  for (const [from, targets] of Object.entries(parsed)) {
+    for (const to of targets) {
+      add(from, to);
+      add(to, from);
+    }
+  }
+
+  return symmetric;
+}
+
 export const lightingService = {
+  getLinks: async (): Promise<Record<string, string[]>> => {
+    const response = await api.get("/api/lights/links");
+    return parseLightLinks(response.data);
+  },
+
+  saveLinks: async (links: Record<string, string[]>): Promise<void> => {
+    await api.put("/api/lights/links", { links });
+  },
+
   /**
    * Sends a light command with optional state, brightness, and color.
    * 
