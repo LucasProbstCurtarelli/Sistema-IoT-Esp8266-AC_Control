@@ -53,18 +53,18 @@ services:
         exec /usr/sbin/mosquitto -c /tmp/mosquitto.conf
 
   tuya-mqtt:
-    image: thecodemonkey/tuya-mqtt:latest
+    build:
+      context: ./tuya-mqtt
+      dockerfile: Dockerfile
     container_name: tuya-mqtt
-    profiles:
-      - tuya
     depends_on:
       - mosquitto
     environment:
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
+      - MQTT_BROKER=mqtt://mosquitto:1883
       - MQTT_USERNAME=${MQTT_USERNAME:-mqtt_user}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
     volumes:
+      - ./tuya-mqtt/tuya-config.js:/app/tuya-config.js:ro
       - ./tuya-mqtt/devices.conf:/app/devices.conf:ro
     networks:
       - app-network

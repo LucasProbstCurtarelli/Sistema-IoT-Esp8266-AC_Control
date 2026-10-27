@@ -1,0 +1,5 @@
+node_modules
+tuya-config.js
+devices.conf
+*.log
+npm-debug.log
