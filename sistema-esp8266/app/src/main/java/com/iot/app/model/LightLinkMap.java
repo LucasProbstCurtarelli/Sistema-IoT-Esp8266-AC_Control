@@ -3,10 +3,11 @@ package com.iot.app.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Singleton row that stores the panel's lamp link map.
@@ -25,7 +26,7 @@ public class LightLinkMap {
     @Column(name = "id", nullable = false)
     private Integer id;
 
-    @Lob
-    @Column(name = "links_json", nullable = false, columnDefinition = "LONGTEXT")
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "links_json", nullable = false)
     private String linksJson;
 }

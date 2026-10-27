@@ -22,6 +22,8 @@ spring:
         globally_quoted_identifiers: true
         jdbc:
           time_zone: America/Sao_Paulo
+        type:
+          preferred_uuid_jdbc_type: CHAR
         format_sql: false
   flyway:
     enabled: true
