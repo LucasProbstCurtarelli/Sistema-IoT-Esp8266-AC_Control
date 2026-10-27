@@ -2,10 +2,10 @@
 # Format: topic [read|write|readwrite] <topic_pattern>
 # 
 # Allow authenticated users to read/write to tuya topics
-user ${MQTT_USERNAME}
+user ADMIN
 topic readwrite tuya/+/command
 topic readwrite tuya/+/query
-topic read tuya/+/state
+topic readwrite tuya/+/state
 
-# Allow read/write to IoT sensor topics
-topic readwrite /iot/+/+
+# /iot/entrada/presenca e /iot/sensores/ac/estado nao cabem no mesmo numero de niveis
+topic readwrite /iot/#

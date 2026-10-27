@@ -47,7 +47,10 @@ services:
         fi
         mosquitto_passwd -c -b /mosquitto/config/passwd "$$MQTT_USERNAME" "$$MQTT_PASSWORD"
         chmod 644 /mosquitto/config/passwd
-        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+        awk -v user="$$MQTT_USERNAME" 'BEGIN { done = 0 } /^user / { print "user " user; done = 1; next } { print } END { if (!done) print "user " user }' /mosquitto/config/acl > /tmp/acl
+        sed 's#acl_file /mosquitto/config/acl#acl_file /tmp/acl#' /mosquitto/config/mosquitto.conf > /tmp/mosquitto.conf
+        chmod 644 /tmp/acl /tmp/mosquitto.conf
+        exec /usr/sbin/mosquitto -c /tmp/mosquitto.conf
 
   tuya-mqtt:
     image: thecodemonkey/tuya-mqtt:latest
