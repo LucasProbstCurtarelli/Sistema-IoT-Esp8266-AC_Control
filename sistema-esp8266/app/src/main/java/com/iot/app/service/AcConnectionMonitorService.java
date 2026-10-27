@@ -111,17 +111,18 @@ public class AcConnectionMonitorService implements InitializingBean, DisposableB
             options.setConnectionTimeout(CONNECTION_TIMEOUT);
             options.setKeepAliveInterval(KEEP_ALIVE_INTERVAL);
             options.setAutomaticReconnect(false);
+            String username = mqttConfig.getUsername();
+            String password = mqttConfig.getPassword();
+            if (username != null && !username.isEmpty() && password != null && !password.isEmpty()) {
+                options.setUserName(username);
+                options.setPassword(password.toCharArray());
+            }
 
             logger.info("Connecting to MQTT broker for AC connection monitoring: {}", mqttConfig.getBrokerUrl());
             mqttClient.connect(options);
 
-            // Subscribe to state topic
-            mqttClient.subscribe(STATE_TOPIC, 0, new IMqttMessageListener() {
-                @Override
-                public void messageArrived(String topic, MqttMessage message) throws Exception {
-                    handleStateMessage(topic, message);
-                }
-            });
+            mqttClient.subscribe(STATE_TOPIC, 0, (topic, message) -> handleStateMessage(topic, message));
+            mqttClient.subscribe("/iot/entrada/presenca", 0, (topic, message) -> handleStateMessage(topic, message));
 
             logger.info("Subscribed to AC state topic: {}", STATE_TOPIC);
             
