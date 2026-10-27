@@ -181,7 +181,7 @@ public class SecurityConfig {
     // Password strength requirements
     private static final int MIN_PASSWORD_LENGTH = 8;
     private static final Pattern PASSWORD_PATTERN = Pattern.compile(
-        "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{" + MIN_PASSWORD_LENGTH + ",}$"
+        "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&._#-])[A-Za-z\\d@$!%*?&._#-]{" + MIN_PASSWORD_LENGTH + ",}$"
     );
 
     /**
@@ -268,7 +268,7 @@ public class SecurityConfig {
                     String errorMsg = String.format(
                         "Admin password does not meet strength requirements. " +
                         "Password must be at least %d characters and contain: " +
-                        "uppercase letter, lowercase letter, digit, and special character (@$!%%*?&).",
+                        "uppercase letter, lowercase letter, digit, and special character (@$!%%*?&._#-).",
                         MIN_PASSWORD_LENGTH
                     );
                     logger.error(errorMsg);
