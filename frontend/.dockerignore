@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.cursor
+.specify
+specs
+coverage
+npm-debug.log
+.env
+.env.*
+!.env.local.example
+*.md
