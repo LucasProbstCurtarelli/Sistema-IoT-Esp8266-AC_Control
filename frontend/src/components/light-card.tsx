@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { lightingService, type LightCommandRequest } from "@/services/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { adjustBrightness, extractBrightness } from "@/lib/color-utils";
+import { extractBrightness } from "@/lib/color-utils";
 
 export interface LightState {
   state: boolean;
@@ -213,27 +213,23 @@ function LightCardComponent({
    */
   const handleBrightnessChange = useCallback((value: number[]) => {
     const newBrightness = value[0];
-    
-    // Calculate adjusted hex color with new brightness (maintains hue and saturation)
-    const adjustedColor = adjustBrightness(lightState.color, newBrightness);
-    
-    // Optimistic update only if light is on
-    if (lightState.state) {
-      const updatedState = { ...lightState, brightness: newBrightness, color: adjustedColor };
-      setLightState(updatedState);
-      onStateChange?.(deviceName, updatedState);
-      
-      // Update linked devices in real-time (UI only, no commands sent yet)
-      if (linkedDevices.length > 0 && onLinkedDeviceStateChange) {
-        const stateUpdate: LightState = {
+
+    if (!lightState.state) {
+      return;
+    }
+
+    const updatedState = { ...lightState, brightness: newBrightness };
+    setLightState(updatedState);
+    onStateChange?.(deviceName, updatedState);
+
+    if (linkedDevices.length > 0 && onLinkedDeviceStateChange) {
+      linkedDevices.forEach((linkedDeviceName) => {
+        onLinkedDeviceStateChange(linkedDeviceName, {
           state: lightState.state,
           brightness: newBrightness,
-          color: adjustedColor,
-        };
-        linkedDevices.forEach(linkedDeviceName => {
-          onLinkedDeviceStateChange(linkedDeviceName, stateUpdate);
+          color: lightState.color,
         });
-      }
+      });
     }
   }, [lightState, deviceName, onStateChange, linkedDevices, onLinkedDeviceStateChange]);
 
@@ -242,30 +238,22 @@ function LightCardComponent({
    */
   const handleBrightnessCommit = useCallback(async (value: number[]) => {
     const newBrightness = value[0];
-    
-    // Skip if light is off
-    if (!lightState.state) return;
-    
-    // Mark as user-initiated change
+
+    if (!lightState.state) {
+      return;
+    }
+
     userInitiatedChange.current = true;
-    
-    // Calculate adjusted hex color with new brightness
-    const adjustedColor = adjustBrightness(lightState.color, newBrightness);
-    
-    // Update state optimistically
-    const updatedState = { ...lightState, brightness: newBrightness, color: adjustedColor };
+
+    const updatedState = { ...lightState, brightness: newBrightness };
     setLightState(updatedState);
     onStateChange?.(deviceName, updatedState);
-    
-    // Send command
-    await sendCommand({ 
-      color: adjustedColor 
-    }, setIsSendingBrightness);
-    
-    // Reset flag after command completes
-    setTimeout(() => {
+
+    try {
+      await sendCommand({ brightness: newBrightness }, setIsSendingBrightness);
+    } finally {
       userInitiatedChange.current = false;
-    }, 100);
+    }
   }, [lightState, deviceName, onStateChange, sendCommand]);
 
   /**
@@ -337,6 +325,7 @@ function LightCardComponent({
           className="h-16 w-16 shrink-0 rounded-full border border-border"
           style={{
             background: lightState.state ? lightState.color : "transparent",
+            opacity: lightState.state ? Math.max(0.2, lightState.brightness / 100) : 1,
             boxShadow: lightState.state ? `0 0 22px ${lightState.color}` : undefined,
           }}
           aria-hidden

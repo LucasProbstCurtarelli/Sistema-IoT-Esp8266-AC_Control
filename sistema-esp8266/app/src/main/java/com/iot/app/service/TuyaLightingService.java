@@ -154,10 +154,11 @@ public class TuyaLightingService implements InitializingBean, DisposableBean {
             logger.debug("Adding power state: {}", request.getState());
         }
         
-        // DPS 21: Mode - Use "white" mode for white colors, "colour" mode for colored lights
-        // White mode typically produces better white color without blue tint
+        // DPS 21 follows the color. Brightness alone stays on DPS 22 and keeps the current mode.
+        // A brightness-only command must not force colour mode: these lamps are often in white mode,
+        // and white mode applies DPS 22, not the value hidden inside a grayer hex color.
         boolean hasBrightness = request.getBrightness() != null;
-        if (hasColor || hasBrightness) {
+        if (hasColor) {
             String mode = isWhiteColor ? "white" : "colour";
             dpsNode.put("21", mode);
             hasChanges = true;
