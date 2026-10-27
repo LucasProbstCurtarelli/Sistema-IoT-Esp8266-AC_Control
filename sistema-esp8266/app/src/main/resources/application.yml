@@ -66,6 +66,9 @@ jwt:
   secret: ${JWT_SECRET:}
   expiration: 86400000
 
+entrada:
+  uid: ${ENTRADA_UID:}
+
 management:
   endpoints:
     web:
