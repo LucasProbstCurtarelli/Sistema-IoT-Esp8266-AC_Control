@@ -55,9 +55,6 @@ public class EntrancePresenceService {
 
     public void onReading(boolean present, String uid, Integer lux) {
         synchronized (this) {
-            if (lux != null && (lux < 0 || lux > 1023)) {
-                lux = null;
-            }
             if (!present) {
                 handleAbsent();
                 return;
@@ -66,7 +63,7 @@ public class EntrancePresenceService {
             if (normalized == null) {
                 return;
             }
-            handlePresent(normalized, lux);
+            handlePresent(normalized);
         }
     }
 
@@ -101,7 +98,7 @@ public class EntrancePresenceService {
         phase = Phase.PENDING;
     }
 
-    private void handlePresent(String uid, Integer lux) {
+    private void handlePresent(String uid) {
         timer.cancel();
         boolean registered = keys.isRegistered(uid);
         boolean sameOccupant = uid.equals(occupantUid)
@@ -131,16 +128,13 @@ public class EntrancePresenceService {
             return;
         }
         if (endingAlert) {
-            applyAfterAlert(lux);
+            applyAfterAlert();
             return;
         }
-        applyRegisteredArrival(lux);
+        applyRegisteredArrival();
     }
 
-    private void applyRegisteredArrival(Integer lux) {
-        if (!isDark(lux)) {
-            return;
-        }
+    private void applyRegisteredArrival() {
         Optional<EntranceLampPort.LampView> left = readLamp(LAMP_1);
         Optional<EntranceLampPort.LampView> right = readLamp(LAMP_2);
         EntranceTuning tuning = settings.current();
@@ -162,16 +156,10 @@ public class EntrancePresenceService {
         commandBoth(on(tuning.normalColor(), brightness));
     }
 
-    private void applyAfterAlert(Integer lux) {
+    private void applyAfterAlert() {
         readLamp(LAMP_1);
         readLamp(LAMP_2);
-        if (isDark(lux)) {
-            commandWhiteAndRemember();
-            return;
-        }
-        if (commandOff()) {
-            settings.markPreferWhite();
-        }
+        commandWhiteAndRemember();
     }
 
     private void commandAlert() {
@@ -234,14 +222,6 @@ public class EntrancePresenceService {
             logger.warn("Falha ao ler estado de {}", deviceName);
             return Optional.empty();
         }
-    }
-
-    private boolean isDark(Integer lux) {
-        if (lux == null) {
-            return false;
-        }
-        Integer threshold = settings.current().luxThreshold();
-        return threshold != null && lux < threshold;
     }
 
     private static boolean bothOnNonAlert(

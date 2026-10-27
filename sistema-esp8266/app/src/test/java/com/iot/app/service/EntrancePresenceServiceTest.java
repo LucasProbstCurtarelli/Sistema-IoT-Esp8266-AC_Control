@@ -116,14 +116,10 @@ class EntrancePresenceServiceTest {
     }
 
     @Test
-    void brightMissingOrUncalibratedArrivalDoesNotCommand() {
-        arriveWithoutTurningOn(400);
-        arriveWithoutTurningOn(800);
-        arriveWithoutTurningOn(null);
-        settings.setThreshold(null);
-        service.onReading(true, RESIDENT, 10);
+    void arrivalWithoutALightReadingTurnsBothLampsWhite() {
+        service.onReading(true, RESIDENT, null);
 
-        assertTrue(lamps.attempts.isEmpty());
+        assertBothOn("#FFFFFF", 100);
     }
 
     @Test
@@ -180,7 +176,7 @@ class EntrancePresenceServiceTest {
     }
 
     @Test
-    void directSwapToRegisteredInTheDarkUsesWhiteAndInTheLightTurnsOff() {
+    void directSwapFromUnknownToRegisteredTurnsBothLampsWhite() {
         service.onReading(true, UNKNOWN, 900);
         lamps.attempts.clear();
 
@@ -194,8 +190,8 @@ class EntrancePresenceServiceTest {
         lamps.attempts.clear();
         service.onReading(true, RESIDENT, 900);
 
-        assertBothOff();
-        assertTrue(settings.current().preferWhite());
+        assertBothOn("#FFFFFF", 100);
+        assertFalse(settings.current().preferWhite());
     }
 
     @Test
@@ -269,17 +265,6 @@ class EntrancePresenceServiceTest {
         service.onReading(true, "xyz", 100);
 
         assertTrue(lamps.attempts.isEmpty());
-    }
-
-    private void arriveWithoutTurningOn(Integer lux) {
-        service.onReading(false, null, lux);
-        timer.fire();
-        lamps.attempts.clear();
-        service.onReading(true, RESIDENT, lux);
-        assertTrue(lamps.attempts.isEmpty(), lamps.attempts.toString());
-        service.onReading(false, null, lux);
-        timer.fire();
-        lamps.attempts.clear();
     }
 
     private void assertBothOn(String color, int brightness) {
