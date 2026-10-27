@@ -6,8 +6,6 @@
 #include <ArduinoJson.h>
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
-#include <IRrecv.h>
-#include <IRutils.h>
 #include <ir_Coolix.h>
 #include <SPI.h>
 #include <MFRC522.h>
@@ -15,13 +13,11 @@
 #include <cstring>
 #include <cstdlib>
 
-// IR send stays on GPIO 5 (D1). IR recv is GPIO 4 (D2).
+// IR send stays on GPIO 5 (D1). There is no IR receiver and no LDR.
 // MFRC522 SPI: CLK 14 (D5), MISO 12 (D6), MOSI 13 (D7), SS 2 (D4), RST 16 (D0).
-// LDR is on A0 behind a divider that keeps the pin at about 1 V max.
 // Status is Serial at 115200. There is no RGB status LED.
 
 const uint16_t PIN_IR_SEND = 5;
-const uint16_t PIN_IR_RECV = 4;
 const uint8_t PIN_RFID_SS = 2;
 const uint8_t PIN_RFID_RST = 16;
 const int PIN_BUTTON_RESET = 0;
@@ -40,7 +36,6 @@ const int TEMP_MIN = 17;
 const int TEMP_MAX = 30;
 const int TEMP_DEFAULT = 22;
 
-const unsigned long IR_PROCESSING_DELAY_MS = 600;
 const unsigned long BUTTON_HOLD_TIME_MS = 3000;
 const unsigned long BUTTON_DEBOUNCE_MS = 50;
 
@@ -54,14 +49,10 @@ char mqttPass[64] = "";
 bool shouldSaveMqtt = false;
 
 IRCoolixAC ac(PIN_IR_SEND);
-IRrecv irrecv(PIN_IR_RECV);
-decode_results results;
 WiFiClient espClient;
 PubSubClient client(espClient);
 MFRC522 reader(PIN_RFID_SS, PIN_RFID_RST);
 
-bool irWaitActive = false;
-unsigned long irWaitStartedMs = 0;
 unsigned long nextReconnectMs = 0;
 
 bool hasFact = false;
@@ -74,7 +65,6 @@ unsigned long lastScanMs = 0;
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void processarComando(String jsonPayload);
 void enviarSinalAC(bool power, int temp);
-void serviceIrWait();
 void publicarStatusOnline();
 void reconnectMQTT();
 void configModeCallback(WiFiManager* myWiFiManager);
@@ -230,37 +220,11 @@ void enviarSinalAC(bool power, int temp) {
     ac.setTemp(temp);
   }
   ac.send();
-  irrecv.enableIRIn();
-  irWaitActive = true;
-  irWaitStartedMs = millis();
-  Serial.println("IR: aguardando loopback");
-}
-
-void serviceIrWait() {
-  if (!irWaitActive) {
-    return;
-  }
-  if (millis() - irWaitStartedMs < IR_PROCESSING_DELAY_MS) {
-    return;
-  }
-  irWaitActive = false;
-
-  bool loopbackDetected = false;
-  if (irrecv.decode(&results)) {
-    loopbackDetected = true;
-    irrecv.resume();
-  }
-
-  String statusMessage = "{\"status\":\"ok\", \"loopback\":\"";
-  statusMessage += loopbackDetected ? "true" : "false";
-  statusMessage += "\"}";
-
-  if (client.publish(TOPIC_STATE, statusMessage.c_str())) {
+  if (client.publish(TOPIC_STATE, "{\"status\":\"ok\"}")) {
     Serial.println("Status publicado com sucesso");
   } else {
     Serial.println("ERRO: falha ao publicar status");
   }
-  Serial.println("IR: janela de 600 ms encerrada, leitura da chave segue");
 }
 
 void publicarStatusOnline() {
@@ -410,10 +374,6 @@ void publishPresenceIfDue(unsigned long now) {
   if (factPresent) {
     doc["uid"] = factUid;
   }
-  int lux = analogRead(A0);
-  if (lux >= 0 && lux <= 1023) {
-    doc["lux"] = lux;
-  }
   char payload[128];
   size_t written = serializeJson(doc, payload, sizeof(payload));
   if (written == 0 || written >= sizeof(payload)) {
@@ -466,14 +426,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n\n=== Inicializando ESP8266 entrada + ar ===");
   Serial.println("Status apenas no Monitor Serial a 115200. Sem LED RGB.");
-  Serial.println("LDR em A0 atras do divisor, maximo cerca de 1 V.");
 
   pinMode(PIN_BUTTON_RESET, INPUT_PULLUP);
   randomSeed(micros());
 
   ac.begin();
-  irrecv.enableIRIn();
-  Serial.println("Componentes IR inicializados");
+  Serial.println("Emissor IR inicializado");
 
   SPI.begin();
   reader.PCD_Init();
@@ -542,7 +500,6 @@ void loop() {
     reconnectMQTT();
   }
   client.loop();
-  serviceIrWait();
   servicePresence();
   ESP.wdtFeed();
 }
