@@ -31,6 +31,7 @@ const int MQTT_PAYLOAD_MAX_SIZE = 256;
 const unsigned long MQTT_RECONNECT_DELAY_MS = 2000;
 const unsigned long PRESENCE_SCAN_MS = 250;
 const unsigned long PRESENCE_HEARTBEAT_MS = 2000;
+const uint8_t PRESENCE_ABSENT_SCANS = 4;
 
 const int TEMP_MIN = 17;
 const int TEMP_MAX = 30;
@@ -61,6 +62,7 @@ bool factDirty = false;
 char factUid[21] = "";
 unsigned long lastPublishMs = 0;
 unsigned long lastScanMs = 0;
+uint8_t absentScans = 0;
 
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void processarComando(String jsonPayload);
@@ -392,9 +394,15 @@ void publishPresenceIfDue(unsigned long now) {
 void scanReader() {
   byte atqa[2];
   byte atqaLen = sizeof(atqa);
-  MFRC522::StatusCode status = reader.PICC_RequestA(atqa, &atqaLen);
+  // WakeupA answers a tag left on the reader. RequestA ignores it after HaltA.
+  MFRC522::StatusCode status = reader.PICC_WakeupA(atqa, &atqaLen);
   if (status == MFRC522::STATUS_TIMEOUT) {
-    noteAbsent();
+    if (absentScans < 255) {
+      absentScans++;
+    }
+    if (absentScans >= PRESENCE_ABSENT_SCANS) {
+      noteAbsent();
+    }
     return;
   }
   if (status != MFRC522::STATUS_OK && status != MFRC522::STATUS_COLLISION) {
@@ -410,6 +418,7 @@ void scanReader() {
   if (uid[0] == '\0') {
     return;
   }
+  absentScans = 0;
   notePresent(uid);
 }
 
