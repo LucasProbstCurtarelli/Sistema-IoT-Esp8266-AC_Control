@@ -32,8 +32,37 @@ if (!fs.existsSync(configPath)) {
 
 const config = require('./tuya-config.js');
 
-const MQTT_BROKER = config.MQTT_BROKER || 'mqtt://localhost:1883';
+const MQTT_BROKER = process.env.MQTT_BROKER || config.MQTT_BROKER || 'mqtt://127.0.0.1:1883';
+const MQTT_USERNAME = process.env.MQTT_USERNAME || config.MQTT_USERNAME || '';
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD || config.MQTT_PASSWORD || '';
 const COMMAND_DEBOUNCE_MS = config.COMMAND_DEBOUNCE_MS || 200;
+
+function ipsFromDevicesConf() {
+    const filePath = path.join(__dirname, 'devices.conf');
+    if (!fs.existsSync(filePath)) {
+        return {};
+    }
+    const ips = {};
+    let section = null;
+    for (const rawLine of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+        const line = rawLine.trim();
+        const header = line.match(/^\[([^\]]+)\]$/);
+        if (header) {
+            section = header[1].trim();
+            continue;
+        }
+        if (!section || !line || line.startsWith('#')) {
+            continue;
+        }
+        const match = line.match(/^ip\s*[:=]\s*(\S+)/i);
+        if (match) {
+            ips[section] = match[1];
+        }
+    }
+    return ips;
+}
+
+const knownIps = ipsFromDevicesConf();
 
 // Initialize devices from configuration
 const DEVICES = {};
@@ -42,7 +71,7 @@ for (const [deviceName, deviceConfig] of Object.entries(config.DEVICES)) {
         id: deviceConfig.id,
         key: deviceConfig.key,
         version: deviceConfig.version || '3.3',
-        ip: deviceConfig.ip || null,
+        ip: deviceConfig.ip || knownIps[deviceName] || null,
         device: null,
         lastCommandTime: 0,
         pendingCommand: null
@@ -123,7 +152,7 @@ async function connectAllDevices() {
 /**
  * Converte cor Tuya (HHHHSSSSVVVV) para RGB hex (#RRGGBB)
  */
-function tuyaColorHexToRgbHex(tuyaHex) {
+function tuyaColorHexToRgbHex(tuyaHex, fullValue) {
     if (!tuyaHex || tuyaHex.length !== 12) {
         return '#FFFFFF'; // Default white
     }
@@ -133,10 +162,10 @@ function tuyaColorHexToRgbHex(tuyaHex) {
     const saturation = parseInt(tuyaHex.substring(4, 8), 16); // 0-1000
     const value = parseInt(tuyaHex.substring(8, 12), 16);     // 0-1000
     
-    // Normaliza para 0-1
+    // Normaliza para 0-1. No modo cor o brilho vai à parte, senão a amostra fica escura.
     const h = hue / 360.0;
     const s = saturation / 1000.0;
-    const v = value / 1000.0;
+    const v = fullValue ? 1 : value / 1000.0;
     
     // Converte HSV para RGB
     const c = v * s;
@@ -219,18 +248,19 @@ function convertTuyaStateToResponse(tuyaState) {
         }
     }
     
+    // DPS 21: Mode. White mode ignores DPS 24, so the swatch must not show that leftover color.
+    const mode = dps['21'] || 'white';
+    const colourMode = mode === 'colour';
+
     // DPS 24: Color (HHHHSSSSVVVV) -> (#RRGGBB)
     let color = '#FFFFFF';
-    if (dps['24'] && typeof dps['24'] === 'string') {
+    if (colourMode && dps['24'] && typeof dps['24'] === 'string') {
         try {
-            color = tuyaColorHexToRgbHex(dps['24']);
+            color = tuyaColorHexToRgbHex(dps['24'], true);
         } catch (e) {
             console.warn(`[Bridge] Erro ao converter cor ${dps['24']}:`, e.message);
         }
     }
-    
-    // DPS 21: Mode
-    const mode = dps['21'] || 'white';
     
     return {
         state,
@@ -372,6 +402,47 @@ async function handleStateQuery(deviceName, queryPayload) {
 }
 
 /**
+ * A Elgin volta ao branco se o brilho (DPS 22) chega no mesmo pacote que a cor.
+ * Modo, cor e brilho vão separados, e a cor é repetida depois do brilho.
+ */
+async function sendSequentialDps(device, data) {
+    const hasMode = data['21'];
+    const hasColor = data['24'];
+    const hasBrightness = data['22'];
+    const hasPower = data['20'];
+
+    if (hasPower !== undefined && (hasMode || hasColor || hasBrightness)) {
+        await device.set({ dps: 20, set: hasPower });
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (hasMode) {
+        await device.set({ dps: 21, set: hasMode });
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (hasColor) {
+        await device.set({ dps: 24, set: hasColor });
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    if (hasBrightness !== undefined && hasBrightness !== null) {
+        await device.set({ dps: 22, set: hasBrightness });
+        if (hasMode === 'colour' && hasColor) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await device.set({ dps: 21, set: 'colour' });
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await device.set({ dps: 24, set: hasColor });
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+
+    if (hasPower !== undefined && !hasMode && !hasColor && (hasBrightness === undefined || hasBrightness === null)) {
+        await device.set({ dps: 20, set: hasPower });
+    }
+}
+
+/**
  * Processa comando MQTT e envia para a lâmpada
  */
 async function processCommand(deviceName, payload) {
@@ -415,111 +486,18 @@ async function processCommand(deviceName, payload) {
         // O payload já está no formato DPS correto do Spring Boot
         // Precisamos converter para o formato que o TuyAPI aceita
         
-        if (payload.multiple && payload.data) {
-            // Formato múltiplo: {"multiple": true, "data": {"20": true, "21": "colour", ...}}
-            console.log(`[Bridge] Usando formato multiple com data:`, payload.data);
-            
-            // Some Tuya devices need commands sent sequentially, especially when changing mode
-            // Send mode first, then color, then brightness, with small delays
-            const hasMode = payload.data['21'];
-            const hasColor = payload.data['24'];
-            const hasBrightness = payload.data['22'];
-            const hasPower = payload.data['20'];
-            
-            // Step 0: Set power first if present with other DPS
-            if (hasPower !== undefined && (hasMode || hasColor || hasBrightness)) {
-                console.log(`[Bridge] Step 0: Setting power to ${hasPower}`);
-                await deviceConfig.device.set({
-                    dps: 20,
-                    set: hasPower
-                });
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Step 1: Set mode FIRST if present (critical for maintaining colour mode)
-            if (hasMode) {
-                console.log(`[Bridge] Step 1: Setting mode to ${hasMode}`);
-                await deviceConfig.device.set({
-                    dps: 21,
-                    set: hasMode
-                });
-                // Small delay to ensure mode is set before other changes
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Step 2: Set color if present
-            if (hasColor) {
-                console.log(`[Bridge] Step 2: Setting color to ${hasColor}`);
-                await deviceConfig.device.set({
-                    dps: 24,
-                    set: hasColor
-                });
-                // Small delay
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-            
-            // Step 3: Set brightness if present
-            if (hasBrightness) {
-                console.log(`[Bridge] Step 3: Setting brightness to ${hasBrightness}`);
-                await deviceConfig.device.set({
-                    dps: 22,
-                    set: hasBrightness
-                });
-                
-                // Wait before re-confirming color to allow lamp to process brightness
-                console.log(`[Bridge] ⏳ Waiting before re-confirming color mode...`);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                // Re-send mode "colour" AND color AFTER brightness to prevent reverting to white
-                if (hasMode && hasMode === 'colour') {
-                    console.log(`[Bridge] Step 4: Re-confirming mode 'colour' after brightness change`);
-                    await deviceConfig.device.set({
-                        dps: 21,
-                        set: 'colour'
-                    });
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    
-                    // Also re-send color to ensure it's maintained
-                    if (hasColor) {
-                        console.log(`[Bridge] Step 5: Re-confirming color after brightness change`);
-                        await deviceConfig.device.set({
-                            dps: 24,
-                            set: hasColor
-                        });
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                }
-            }
-            
-            // Set power alone if no other DPS are present
-            if (hasPower !== undefined && !hasMode && !hasColor && !hasBrightness) {
-                console.log(`[Bridge] Setting power to ${hasPower}`);
-                await deviceConfig.device.set({
-                    dps: 20,
-                    set: hasPower
-                });
-            }
-            
-            console.log(`[Bridge] ✅ Comandos sequenciais enviados com sucesso`);
-        } else if (payload.dps) {
-            // Formato DPS: {"dps": {"20": true}} ou {"dps": {"20": true, "22": 500}}
-            const dpsKeys = Object.keys(payload.dps);
-            console.log(`[Bridge] Processando DPS:`, payload.dps, `(${dpsKeys.length} DPS)`);
-            
+        const dpsData = (payload.multiple && payload.data) ? payload.data : payload.dps;
+        if (dpsData && typeof dpsData === 'object') {
+            const dpsKeys = Object.keys(dpsData);
+            console.log(`[Bridge] Processando DPS:`, dpsData, `(${dpsKeys.length} DPS)`);
+
             if (dpsKeys.length > 1) {
-                // Múltiplos DPS - usa formato multiple
-                await deviceConfig.device.set({
-                    multiple: true,
-                    data: payload.dps
-                });
-            } else {
-                // DPS único - formato direto
+                await sendSequentialDps(deviceConfig.device, dpsData);
+            } else if (dpsKeys.length === 1) {
                 const dpsKey = dpsKeys[0];
-                const dpsValue = payload.dps[dpsKey];
-                console.log(`[Bridge] DPS único: ${dpsKey} = ${dpsValue}`);
                 await deviceConfig.device.set({
-                    dps: parseInt(dpsKey),
-                    set: dpsValue
+                    dps: parseInt(dpsKey, 10),
+                    set: dpsData[dpsKey]
                 });
             }
         } else {
@@ -546,13 +524,24 @@ function startBridge() {
     console.log('🌉 TUYA MQTT BRIDGE');
     console.log('='.repeat(60));
     console.log(`Conectando ao broker MQTT: ${MQTT_BROKER}`);
-    console.log(`Dispositivos configurados: ${Object.keys(DEVICES).join(', ')}\n`);
-    
-    mqttClient = mqtt.connect(MQTT_BROKER, {
+    console.log(`MQTT user: ${MQTT_USERNAME || '(nenhum)'}`);
+    console.log(`Dispositivos configurados: ${Object.keys(DEVICES).join(', ')}`);
+    for (const [name, device] of Object.entries(DEVICES)) {
+        console.log(`[Bridge] ${name}: ${device.ip ? 'IP fixo' : 'sem IP, vai procurar na rede'}`);
+    }
+    console.log('');
+
+    const mqttOptions = {
         clientId: 'tuya-mqtt-bridge',
         clean: true,
         reconnectPeriod: 1000
-    });
+    };
+    if (MQTT_USERNAME) {
+        mqttOptions.username = MQTT_USERNAME;
+        mqttOptions.password = MQTT_PASSWORD;
+    }
+
+    mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
 
     mqttClient.on('connect', async () => {
         console.log('✅ Conectado ao broker MQTT\n');
